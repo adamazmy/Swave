@@ -66,7 +66,8 @@ make build-index         # sparse matrix → neighbours table (METHOD=cosine|pmi
 make eval                # hit-rate@50, recall@50 on held-out playlists → eval/results.csv
 make dev                 # API on :8000 + web on :3000
 make test                # pytest + web typecheck/lint
-make feedback            # weekly keep rate, most-removed tracks/artists
+make feedback            # weekly keep rate, most-removed tracks/artists (WEEKS=8); counts once
+                         # per (session, track), kept = kept OR more_like_this
 ```
 
 ## Conventions
