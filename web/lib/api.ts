@@ -85,6 +85,7 @@ export const api = {
     adventure?: number;
     alpha?: number;
     exclude?: string[];
+    exclude_songs?: string[]; // hidden in every version (same artist + title)
     n?: number;
   }) =>
     request<{ results: Recommendation[]; seeds: Track[]; unknown_seeds: string[]; alpha: number }>("/recommend", {

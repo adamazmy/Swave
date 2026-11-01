@@ -131,7 +131,7 @@ export default function SeedScreen() {
     const session = newSession();
     const run = session.slice(0, 8);
     // Results offers "Add to <playlist>" when the vibe came from a pasted playlist.
-    writeSource(source, run);
+    writeSource(source && { ...source, trackUris: sourceTracks.map((t) => t.track_uri) }, run);
     api.log(seeds.map((s, i) => ({ action: "seeded", track_uri: s.track_uri, position: i, session_id: session })));
     // A fresh `run` per vibe makes the (kept-alive) Results page start over; see results-client.
     router.push(`/results?seeds=${seeds.map((s) => s.track_uri).join(",")}&run=${run}`);

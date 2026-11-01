@@ -31,10 +31,11 @@ TRACKS = [
     (3, "Paper Planes Again", "Dummy Duo", 50),
     (4, "Quiet Engine", "Mock Orchestra", 20),
     (5, "100% Synthetic_Song", "Test Artist", 10),
+    (6, "Static Bloom - Live", "Mock Orchestra", 15),  # another version of track 2
 ]
 # (track_id, neighbour_id, sim, co_count)
 NEIGHBOURS = [
-    (1, 0, 0.30, 120), (1, 2, 0.50, 80), (1, 3, 0.40, 30), (1, 4, 0.20, 10),
+    (1, 0, 0.30, 120), (1, 2, 0.50, 80), (1, 3, 0.40, 30), (1, 4, 0.20, 10), (1, 6, 0.10, 5),
     (2, 0, 0.25, 90), (2, 1, 0.50, 80), (2, 4, 0.45, 15),
 ]
 
@@ -212,3 +213,12 @@ def test_deezer_pick_prefers_exact_title_and_same_artist():
     studio = {"id": 4, "title": "Static Bloom", "artist": {"name": "Mock Orchestra"}}
     assert deezer.pick(cands + [studio], "Mock Orchestra", "Static Bloom")["id"] == 4  # exact wins
     assert deezer.pick(cands[1:2], "Mock Orchestra", "Static Bloom") is None  # wrong artist
+
+
+def test_exclude_songs_hides_every_version_of_a_song(client):
+    base = [r["track_uri"] for r in client.post("/recommend", json={"seeds": [uri(1)]}).json()["results"]]
+    assert uri(2) in base and uri(6) in base  # studio + live version are both candidates
+    got = [r["track_uri"] for r in client.post(
+        "/recommend", json={"seeds": [uri(1)], "exclude_songs": [uri(2)]}).json()["results"]]
+    assert uri(2) not in got and uri(6) not in got  # "Static Bloom" in any version
+    assert uri(3) in got and uri(0) in got  # other songs untouched

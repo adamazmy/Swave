@@ -72,6 +72,9 @@ class RecommendIn(BaseModel):
         None, ge=0.0, le=1.0,
         description="slider 0 = familiar … 1 = adventurous; overrides alpha (see alpha_for)")
     exclude: list[str] = Field(default_factory=list, max_length=1000)
+    # Songs to leave out by song, not only by id: any version with the same artist +
+    # normalised title is excluded too (e.g. the songs of the pasted playlist).
+    exclude_songs: list[str] = Field(default_factory=list, max_length=1000)
     n: int = Field(50, ge=1, le=100)
 
 
@@ -251,7 +254,16 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
                 (seed_ids,),
             ).fetchall()
             arr = np.array(rows, dtype=np.float64).reshape(-1, 4)
-            exclude = np.array(seed_ids + [ids[u] for u in body.exclude if u in ids])
+            excluded = seed_ids + [ids[u] for u in body.exclude if u in ids]
+            if body.exclude_songs and len(arr):
+                keys = {matching.song_key(r[0], r[1]) for r in conn.execute(
+                    "SELECT name, artist FROM tracks WHERE track_uri = ANY(%s)",
+                    (body.exclude_songs,)).fetchall()}
+                excluded += [r[0] for r in conn.execute(
+                    "SELECT track_id, name, artist FROM tracks WHERE track_id = ANY(%s)",
+                    (np.unique(arr[:, 0]).astype(np.int64).tolist(),)).fetchall()
+                    if matching.song_key(r[1], r[2]) in keys]
+            exclude = np.array(excluded)
             cand = (arr[:, 0].astype(np.int64), arr[:, 1], arr[:, 2], arr[:, 3])
             alpha = body.alpha if body.adventure is None else alpha_for(
                 body.adventure, *cand, exclude, body.n)

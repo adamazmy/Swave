@@ -49,6 +49,9 @@ export default function ResultsScreen() {
   const [cover, setCover] = useState<string | null>(() => restored?.cover ?? null);
   // Playlist the vibe was imported from (set by the Seed screen): offers "Add to <name>".
   const [source] = useState(() => readSource(params.get("run")));
+  // …and "Hide songs already in <name>" (on by default; every version of those songs).
+  const [hideSource, setHideSource] = useState(() => restored?.hideSource ?? true);
+  const hiddenSongs = hideSource ? (source?.trackUris ?? []) : [];
   // Alpha the API picked for the current list: replacements must use the same one.
   const [alpha, setAlpha] = useState(() => restored?.alpha ?? 0);
   // Playlist this vibe was saved to: the next save updates it instead of making a duplicate.
@@ -74,9 +77,9 @@ export default function ResultsScreen() {
   const session = useRef<string>("");
   const requestId = useRef(0);
   // Latest values for async callbacks without re-creating them (updated after each render).
-  const latest = useRef({ list, kept, removed, seeds, slider });
+  const latest = useRef({ list, kept, removed, seeds, slider, hiddenSongs });
   useLayoutEffect(() => {
-    latest.current = { list, kept, removed, seeds, slider };
+    latest.current = { list, kept, removed, seeds, slider, hiddenSongs };
   });
 
   const log = useCallback((events: Omit<AppEvent, "session_id" | "slider">[]) => {
@@ -87,7 +90,7 @@ export default function ResultsScreen() {
   const load = useCallback(
     async (nextSeeds: string[], nextSlider: number) => {
       const id = ++requestId.current;
-      const { list: cur, kept: k, removed: r } = latest.current;
+      const { list: cur, kept: k, removed: r, hiddenSongs: hidden } = latest.current;
       const keptTracks = cur.filter((t) => k.has(t.track_uri));
       try {
         // Kept tracks are not excluded, so they come back with up-to-date reasons.
@@ -95,6 +98,7 @@ export default function ResultsScreen() {
           seeds: nextSeeds,
           adventure: clampSlider(nextSlider),
           exclude: [...r],
+          exclude_songs: hidden,
           n: Math.min(100, LIST_SIZE + keptTracks.length),
         });
         if (id !== requestId.current) return; // a newer request superseded this one
@@ -139,9 +143,15 @@ export default function ResultsScreen() {
     if (status !== "ready" || list.length === 0) return;
     writeResults({
       run, seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks,
-      name, description, cover, alpha, saved,
+      name, description, cover, alpha, saved, hideSource,
     });
-  }, [status, run, seeds, slider, list, kept, removed, seedTracks, name, description, cover, alpha, saved]);
+  }, [status, run, seeds, slider, list, kept, removed, seedTracks, name, description, cover, alpha, saved, hideSource]);
+
+  function toggleHideSource(on: boolean) {
+    setHideSource(on);
+    latest.current.hiddenSongs = on ? (source?.trackUris ?? []) : [];
+    void load(latest.current.seeds, latest.current.slider);
+  }
 
   function startOver() {
     audio.current?.pause();
@@ -185,6 +195,7 @@ export default function ResultsScreen() {
         seeds,
         alpha,
         exclude: [...latest.current.list.map((x) => x.track_uri), ...nextRemoved],
+        exclude_songs: hiddenSongs,
         n: 1,
       });
       replacement = res.results[0];
@@ -346,6 +357,13 @@ export default function ResultsScreen() {
           className="w-full"
           aria-valuetext={`${Math.round(slider * 100)}% adventurous`}
         />
+        {source && (source.trackUris?.length ?? 0) > 0 && (
+          <label className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
+            <input type="checkbox" checked={hideSource} onChange={(e) => toggleHideSource(e.target.checked)} />
+            Hide songs already in “{source.name}”
+            <span className="text-zinc-500">({source.trackUris?.length})</span>
+          </label>
+        )}
       </section>
 
       {notice && (

@@ -22,6 +22,7 @@ export type StoredResults = {
   description: string;
   cover: string | null; // base64 JPEG (no data: prefix), ≤ 256 KB
   alpha: number; // exponent the API picked for the current list (reused for replacements)
+  hideSource?: boolean; // hide songs already in the pasted playlist (default on)
   saved: SavedPlaylist | null; // playlist this vibe was saved to: later saves update it
 };
 
