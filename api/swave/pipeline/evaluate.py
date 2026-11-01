@@ -29,7 +29,10 @@ def git_hash() -> str:
         return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True).stdout.strip()
 
     h = run("git", "rev-parse", "--short", "HEAD") or "nogit"
-    return h + ("-dirty" if run("git", "status", "--porcelain", "--untracked-files=no") else "")
+    # results.csv itself changes on every eval, so it doesn't count as uncommitted code.
+    dirty = run("git", "status", "--porcelain", "--untracked-files=no", "--", ".",
+                ":(exclude)eval/results.csv")
+    return h + ("-dirty" if dirty else "")
 
 
 def metrics(recs: np.ndarray, hidden: np.ndarray) -> tuple[float, float]:
