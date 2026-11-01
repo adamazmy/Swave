@@ -10,6 +10,7 @@ import {
   MAX_SEEDS,
   mergeKept,
   parseSeeds,
+  refreshKept,
   replaceAt,
   sliderToAlpha,
 } from "@/lib/playlist";
@@ -61,14 +62,15 @@ export default function ResultsScreen() {
       const { list: cur, kept: k, removed: r } = latest.current;
       const keptTracks = cur.filter((t) => k.has(t.track_uri));
       try {
+        // Kept tracks are not excluded, so they come back with up-to-date reasons.
         const res = await api.recommend({
           seeds: nextSeeds,
           alpha: sliderToAlpha(nextSlider),
-          exclude: [...r, ...k],
-          n: Math.max(1, LIST_SIZE - keptTracks.length),
+          exclude: [...r],
+          n: Math.min(100, LIST_SIZE + keptTracks.length),
         });
         if (id !== requestId.current) return; // a newer request superseded this one
-        const merged = mergeKept(keptTracks, res.results);
+        const merged = mergeKept(refreshKept(keptTracks, res.results, nextSeeds), res.results);
         setList(merged);
         setSeedTracks(res.seeds);
         setError(null);

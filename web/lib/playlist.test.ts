@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSeed, mergeKept, parseSeeds, replaceAt, sliderToAlpha } from "./playlist";
+import { addSeed, mergeKept, parseSeeds, refreshKept, replaceAt, sliderToAlpha } from "./playlist";
 
 // Synthetic ids only.
 const u = (i: number) => `spotify:track:fake${String(i).padStart(18, "0")}`;
@@ -21,6 +21,19 @@ describe("mergeKept", () => {
   });
   it("shows every kept track even past size", () => {
     expect(mergeKept([t(1), t(2), t(3)], [t(4)], 2)).toHaveLength(3);
+  });
+});
+
+describe("refreshKept", () => {
+  const r = (i: number, reason: string) => ({ track_uri: u(i), reason });
+  it("takes fresh reasons, marks seeds, keeps the rest as-is", () => {
+    const kept = [r(1, "old"), r(2, "old"), r(3, "old")];
+    const fresh = [r(1, "new"), r(9, "other")];
+    expect(refreshKept(kept, fresh, [u(2)]).map((k) => k.reason)).toEqual([
+      "new",
+      "one of your seeds",
+      "old",
+    ]);
   });
 });
 

@@ -31,6 +31,24 @@ export function mergeKept<T extends HasUri>(kept: T[], fresh: T[], size = LIST_S
   return [...kept, ...rest.slice(0, Math.max(0, size - kept.length))];
 }
 
+/**
+ * Kept tracks with up-to-date reasons after a re-rank: the fresh copy if the recommender still
+ * returns it, "one of your seeds" if it became a seed (seeds are never recommended), else as-is.
+ */
+export function refreshKept<T extends HasUri & { reason: string }>(
+  kept: T[],
+  fresh: T[],
+  seeds: string[],
+): T[] {
+  const byUri = new Map(fresh.map((t) => [t.track_uri, t]));
+  return kept.map((k) => {
+    const f = byUri.get(k.track_uri);
+    if (f) return f;
+    if (seeds.includes(k.track_uri)) return { ...k, reason: "one of your seeds" };
+    return k;
+  });
+}
+
 /** Replace the row at `index` with `replacement`, or drop it if there is none. */
 export function replaceAt<T>(list: T[], index: number, replacement?: T): T[] {
   const next = [...list];
