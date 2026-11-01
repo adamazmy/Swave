@@ -125,7 +125,14 @@ export const api = {
     ),
 
   importPlaylist: (url: string) =>
-    request<{ playlist: { id: string; name: string }; tracks: Track[]; total: number; missing: number }>("/import", {
+    request<{
+      playlist: { id: string; name: string };
+      tracks: Track[];
+      total: number;
+      missing: number;
+      loose: number; // matched by title + artist (Spotify id changed since 2018)
+      unmatched: string[];
+    }>("/import", {
       method: "POST",
       body: JSON.stringify({ url }),
     }),

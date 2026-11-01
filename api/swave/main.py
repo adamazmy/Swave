@@ -17,7 +17,7 @@ from fastapi.responses import RedirectResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, StringConstraints
 
-from swave import deezer, spotify
+from swave import deezer, matching, spotify
 from swave.config import database_url
 from swave.recommend import MAX_ALPHA, alpha_for, score
 
@@ -143,6 +143,8 @@ class ImportOut(BaseModel):
     tracks: list[Track]  # tracks of the playlist that are in our index, playlist order
     total: int  # tracks in the Spotify playlist
     missing: int  # not in the dataset index
+    loose: int  # matched by artist + title rather than the exact Spotify id
+    unmatched: list[str]  # "Title · Artist" of songs not found (first 50)
 
 
 class AuthStatus(BaseModel):
@@ -383,8 +385,11 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
                         body: AddIn):
         """Append kept songs to one of your playlists, skipping songs already in it."""
         with pool.connection() as conn:
+            keys = {r[0]: matching.song_key(r[1], r[2]) for r in conn.execute(
+                "SELECT track_uri, name, artist FROM tracks WHERE track_uri = ANY(%s)",
+                (body.track_uris,)).fetchall()}
             try:
-                return AddOut(**spotify.add_new_items(conn, http, playlist_id, body.track_uris))
+                return AddOut(**spotify.add_new_items(conn, http, playlist_id, body.track_uris, keys))
             except spotify.SpotifyError as e:
                 if e.status in (403, 404):
                     raise HTTPException(403, "Spotify only lets Swave change playlists you own or "
@@ -400,7 +405,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
             raise HTTPException(422, "That doesn't look like a Spotify playlist link")
         with pool.connection() as conn:
             try:
-                uris = spotify.playlist_track_uris(conn, http, pid)
+                items = spotify.playlist_items(conn, http, pid)
                 name = spotify.playlist_name(conn, http, pid)
             except spotify.SpotifyError as e:
                 if e.status in (403, 404):  # dev mode: only playlists you own or collaborate on
@@ -409,14 +414,19 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
                 raise http_error(e) from None
             except spotify.NotConnected as e:
                 raise http_error(e) from None
-            uris = list(dict.fromkeys(uris))
-            rows = conn.execute(
-                """SELECT track_uri, name, artist, album, playlist_count FROM tracks
-                   WHERE track_uri = ANY(%s)""", (uris,)).fetchall()
-        known = {r[0]: r for r in rows}
-        tracks = [Track(track_uri=r[0], name=r[1], artist=r[2], album=r[3], playlist_count=r[4])
-                  for u in uris if (r := known.get(u))]
+            unique = list({i["uri"]: i for i in items}.values())
+            matches = matching.map_items(
+                conn, [matching.Item(i["uri"], i["name"], i["artists"]) for i in unique])
+        tracks, seen = [], set()
+        for m in matches:
+            if m.row and m.row[0] not in seen:  # two Spotify versions can map to one track
+                seen.add(m.row[0])
+                tracks.append(Track(track_uri=m.row[0], name=m.row[1], artist=m.row[2],
+                                    album=m.row[3], playlist_count=m.row[4]))
+        unmatched = [f"{m.item.name} · {', '.join(m.item.artists)}" for m in matches if m.row is None]
         return ImportOut(playlist=SourcePlaylist(id=pid, name=name), tracks=tracks,
-                         total=len(uris), missing=len(uris) - len(tracks))
+                         total=len(unique), missing=len(unmatched),
+                         loose=sum(m.how in ("title", "fuzzy") for m in matches),
+                         unmatched=unmatched[:50])
 
     return app

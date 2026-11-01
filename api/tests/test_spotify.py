@@ -26,7 +26,13 @@ class FakeSpotify:
         self.scope = "playlist-modify-private ugc-image-upload"
         self.fail_cover = False
         self.covers: dict[str, bytes] = {}
-        self.playlist_items = [uri(1), "spotify:episode:fake000000000000000001", uri(2), uri(99)]
+        # (uri, title, artist) as Spotify returns them today
+        self.playlist_items = [
+            (uri(1), "Paper Lanterns", "The Placeholders"),
+            ("spotify:episode:fake000000000000000001", "Some Podcast", "Host"),
+            (uri(2), "Static Bloom", "Mock Orchestra"),
+            (uri(99), "Unknown Song", "Nobody"),
+        ]
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         self.requests.append(req)
@@ -67,7 +73,8 @@ class FakeSpotify:
             off = int(req.url.params["offset"])
             page = self.playlist_items[off:off + 2]  # tiny pages to exercise pagination
             nxt = "next" if off + 2 < len(self.playlist_items) else None
-            return httpx.Response(200, json={"items": [{"item": {"uri": u}} for u in page], "next": nxt})
+            return httpx.Response(200, json={"items": [
+                {"item": {"uri": u, "name": n, "artists": [{"name": a}]}} for u, n, a in page], "next": nxt})
         return httpx.Response(404, json={"error": {"status": 404, "message": "not found"}})
 
 
@@ -265,3 +272,42 @@ def test_add_to_someone_elses_playlist(client, fake):
     fake.forbid_read = True
     r = client.post("/playlists/37i9dQZF1DXcBWIGoYBM5M/add", json={"track_uris": [uri(1)]})
     assert r.status_code == 403 and "own or collaborate" in r.json()["detail"]
+
+
+def other_id(i: int) -> str:
+    """A Spotify id the dataset doesn't have: same song, newer release."""
+    return f"spotify:track:new{i:019d}"
+
+
+def test_import_matches_songs_whose_spotify_id_changed(client, fake):
+    login(client)
+    fake.playlist_items = [
+        (other_id(1), "Static Bloom - 2011 Remaster", "Mock Orchestra"),   # title match -> uri(2)
+        (other_id(2), "Paper Lanterns (Live)", "The Placeholders"),         # title match -> uri(1)
+        (other_id(3), "Quiet Engines", "Mock Orchestra"),                   # near-identical -> uri(4)
+        (other_id(4), "Quiet Engine Part Two Reprise", "Mock Orchestra"),  # prefix too short: no match
+        (other_id(5), "Static Bloom", "Cover Band"),                        # wrong artist: no match
+    ]
+    body = client.post("/import", json={"url": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"}).json()
+    assert [t["track_uri"] for t in body["tracks"]] == [uri(2), uri(1), uri(4)]
+    assert (body["total"], body["missing"], body["loose"]) == (5, 2, 3)
+    assert body["unmatched"] == ["Quiet Engine Part Two Reprise · Mock Orchestra", "Static Bloom · Cover Band"]
+
+
+def test_two_versions_of_one_song_appear_once(client, fake):
+    login(client)
+    fake.playlist_items = [(uri(2), "Static Bloom", "Mock Orchestra"),
+                           (other_id(1), "Static Bloom - Remastered", "Mock Orchestra")]
+    body = client.post("/import", json={"url": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"}).json()
+    assert [t["track_uri"] for t in body["tracks"]] == [uri(2)]
+
+
+def test_add_skips_a_song_already_there_under_another_id(client, fake):
+    login(client)
+    fake.playlist_items = [(other_id(1), "Static Bloom - 2011 Remaster", "Mock Orchestra")]
+    pid = "37i9dQZF1DXcBWIGoYBM5M"
+    r = client.post(f"/playlists/{pid}/add", json={"track_uris": [uri(2), uri(3)]})
+    assert r.json()["added"] == 1 and r.json()["skipped"] == 1
+    adds = [json.loads(q.content)["uris"] for q in fake.requests
+            if q.method == "POST" and q.url.path == f"/v1/playlists/{pid}/items"]
+    assert adds == [[uri(3)]]

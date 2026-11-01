@@ -82,6 +82,11 @@ Follow-ups (not now): recommender v2 deeper candidate pool so popular vibes can 
    - Dropped the "public/private" option: Spotify ignores `public: false` for app-created playlists (create and update both verified). Users switch to private in the Spotify app.
 4. Found while testing: the source playlist leaked into other vibes of the same tab (Back); now tied to the vibe's run id.
 
+## Owner bug round 3 (2026-11-01)
+
+1. *Pasted playlist only finds some songs*: matching was exact Spotify id only, but the MPD is a 2018 snapshot. Measured: 4 of 8 well-known songs (Mr. Brightside, Smells Like Teen Spirit, Seven Nation Army, Somebody That I Used To Know) have a different Spotify id today. Now `matching.map_items`: exact id → same artist + normalised title → same artist + title prefix (≥ 60%), most popular version wins; the UI shows how many matched loosely and lists the songs not found. "Add to playlist" also skips songs present under another id.
+2. *Refresh loses everything*: only Results was saved, per tab. Now the seed draft (seeds, pasted playlist + its songs), the vibe and the source playlist live in localStorage; Seed screen shows "Your last vibe → Continue" and a "Start over" button (also on Results). Same seeds after "Edit seeds" continue the existing vibe instead of wiping its kept songs.
+
 ## M4: Spotify OAuth + save
 
 - PKCE login → refresh token in `spotify_auth`. Save = `POST /me/playlists` + `POST /playlists/{id}/items` (batches of 100).

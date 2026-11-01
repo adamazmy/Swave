@@ -1,21 +1,33 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Track } from "@/lib/api";
-import { formatCount, MAX_START_SEEDS } from "@/lib/playlist";
+import { formatCount, MAX_START_SEEDS, sameSet } from "@/lib/playlist";
 import { newSession } from "@/lib/session";
 import { writeSource, type SourcePlaylist } from "@/lib/source";
-import { clearResults } from "@/lib/stored";
+import {
+  clearAll,
+  clearResults,
+  readDraft,
+  readLatestResults,
+  resultsUrl,
+  writeDraft,
+  type ImportInfo,
+} from "@/lib/stored";
 import { PlusIcon, Spinner, XIcon } from "./icons";
 
 export default function SeedScreen() {
   const router = useRouter();
+  // Browser-only component (see seed-client.tsx): safe to read localStorage in initialisers.
+  const [draft] = useState(() => readDraft());
+  const [latest, setLatest] = useState(() => readLatestResults());
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [seeds, setSeeds] = useState<Track[]>([]);
+  const [seeds, setSeeds] = useState<Track[]>(() => draft?.seeds ?? []);
 
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const inflight = useRef<AbortController | null>(null);
@@ -60,12 +72,32 @@ export default function SeedScreen() {
     setSeeds([...seeds, t]);
   }
 
-  const [link, setLink] = useState("");
+  const [link, setLink] = useState(() => draft?.link ?? "");
   const [importing, setImporting] = useState(false);
+  // Transient problems only (errors, "connect first"); the import summary comes from importInfo.
   const [importMsg, setImportMsg] = useState<{ text: string; connect?: boolean } | null>(null);
   // The pasted playlist and its songs that are in the dataset: you pick seeds from them.
-  const [source, setSource] = useState<SourcePlaylist | null>(null);
-  const [sourceTracks, setSourceTracks] = useState<Track[]>([]);
+  const [source, setSource] = useState<SourcePlaylist | null>(() => draft?.source ?? null);
+  const [sourceTracks, setSourceTracks] = useState<Track[]>(() => draft?.sourceTracks ?? []);
+  const [importInfo, setImportInfo] = useState<ImportInfo | null>(() => draft?.importInfo ?? null);
+
+  // Keep the draft across refreshes until "Start over".
+  useEffect(() => {
+    writeDraft({ seeds, link, source, sourceTracks, importInfo });
+  }, [seeds, link, source, sourceTracks, importInfo]);
+
+  function startOver() {
+    clearAll();
+    setSeeds([]);
+    setLink("");
+    setSource(null);
+    setSourceTracks([]);
+    setImportInfo(null);
+    setImportMsg(null);
+    setQuery("");
+    setResults([]);
+    setLatest(null);
+  }
 
   async function importLink(e: React.FormEvent) {
     e.preventDefault();
@@ -76,12 +108,7 @@ export default function SeedScreen() {
       const res = await api.importPlaylist(link.trim());
       setSource(res.playlist);
       setSourceTracks(res.tracks);
-      setImportMsg({
-        text:
-          res.tracks.length === 0
-            ? `None of the ${res.total} songs in “${res.playlist.name}” are in the dataset. Pick seeds by search instead.`
-            : `${res.tracks.length} of ${res.total} songs in “${res.playlist.name}” are in the dataset. Pick up to ${MAX_START_SEEDS} as seeds.`,
-      });
+      setImportInfo({ total: res.total, missing: res.missing, loose: res.loose, unmatched: res.unmatched });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setImportMsg({ text: "Connect Spotify to read your playlists.", connect: true });
@@ -94,6 +121,12 @@ export default function SeedScreen() {
   }
 
   function start() {
+    // Same seeds as the saved vibe (e.g. back from "Edit seeds"): continue it, keep its songs.
+    const last = readLatestResults();
+    if (last && sameSet(last.seeds, seeds.map((s) => s.track_uri))) {
+      router.push(resultsUrl(last));
+      return;
+    }
     clearResults();
     const session = newSession();
     const run = session.slice(0, 8);
@@ -106,10 +139,39 @@ export default function SeedScreen() {
 
   return (
     <div className="space-y-8">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Swave</h1>
-        <p className="text-zinc-400">Pick 1–{MAX_START_SEEDS} songs that capture the vibe.</p>
+      <header className="flex items-start justify-between gap-4">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold tracking-tight">Swave</h1>
+          <p className="text-zinc-400">Pick 1–{MAX_START_SEEDS} songs that capture the vibe.</p>
+        </div>
+        {(seeds.length > 0 || source || latest) && (
+          <button
+            onClick={startOver}
+            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-white/5"
+            title="Forget the picked seeds, the pasted playlist and your last vibe"
+          >
+            Start over
+          </button>
+        )}
       </header>
+
+      {latest && (
+        <section aria-label="Your last vibe" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm text-zinc-400">Your last vibe</p>
+            <p className="truncate">
+              {latest.seedTracks.map((s) => s.name).join(", ") || `${latest.seeds.length} seeds`}
+              <span className="text-zinc-500"> · {latest.kept.length} kept</span>
+            </p>
+          </div>
+          <Link
+            href={resultsUrl(latest)}
+            className="rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium hover:bg-zinc-700"
+          >
+            Continue →
+          </Link>
+        </section>
+      )}
 
       {seeds.length > 0 && (
         <section aria-label="Your seeds" className="space-y-4">
@@ -192,22 +254,52 @@ export default function SeedScreen() {
             )}
           </p>
         )}
-        {source && sourceTracks.length > 0 && (
+        {source && importInfo && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-300">From “{source.name}”</span>
+            <div className="flex items-start justify-between gap-3 text-sm">
+              <p className="text-zinc-300" aria-live="polite">
+                {sourceTracks.length === 0 ? (
+                  <>None of the {importInfo.total} songs in “{source.name}” are in the dataset. Pick seeds by search instead.</>
+                ) : (
+                  <>
+                    Found {sourceTracks.length} of {importInfo.total} songs from “{source.name}”
+                    {importInfo.loose > 0 && (
+                      <span className="text-zinc-500"> ({importInfo.loose} matched by title &amp; artist)</span>
+                    )}
+                    . Pick up to {MAX_START_SEEDS} as seeds.
+                  </>
+                )}
+              </p>
               <button
                 onClick={() => {
                   setSource(null);
                   setSourceTracks([]);
+                  setImportInfo(null);
                   setImportMsg(null);
                 }}
-                className="text-zinc-500 hover:text-zinc-300"
+                className="shrink-0 text-zinc-500 hover:text-zinc-300"
               >
                 Clear
               </button>
             </div>
-            <PickList tracks={sourceTracks} onPick={add} isSeed={isSeed} disabled={full} scroll />
+            {sourceTracks.length > 0 && (
+              <PickList tracks={sourceTracks} onPick={add} isSeed={isSeed} disabled={full} scroll />
+            )}
+            {importInfo.unmatched.length > 0 && (
+              <details className="text-sm text-zinc-500">
+                <summary className="cursor-pointer hover:text-zinc-300">
+                  {importInfo.missing} not in the dataset (released after 2018 or too rare)
+                </summary>
+                <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto pl-4">
+                  {importInfo.unmatched.map((u) => (
+                    <li key={u} className="truncate">{u}</li>
+                  ))}
+                  {importInfo.missing > importInfo.unmatched.length && (
+                    <li>…and {importInfo.missing - importInfo.unmatched.length} more</li>
+                  )}
+                </ul>
+              </details>
+            )}
           </div>
         )}
       </section>

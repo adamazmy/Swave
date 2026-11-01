@@ -88,7 +88,12 @@ make feedback            # weekly keep rate, most-removed tracks/artists (WEEKS=
 - Search max `limit` is 10; track `popularity` is removed (we use `playlist_count` instead). App owner needs Premium.
 - **Public/private can't be set**: Spotify ignores `public: false` on create AND on `PUT /playlists/{id}` for this app (verified 2026-11-01, known community issue). The UI has no public toggle and never says "private"; it tells the user to use Spotify → ⋯ → Make private.
 - **Covers**: `PUT /playlists/{id}/images`, base64 JPEG ≤ 256 KB, scope `ugc-image-upload` (verified working). Logins from before that scope report `can_upload_cover: false` → UI asks to reconnect. Cover is uploaded after the playlist is saved; a cover failure returns `cover_error` but keeps the playlist.
-- **Add to a pasted playlist**: `POST /playlists/{id}/add` appends only songs not already in it (reads the playlist first); never removes or reorders. The source playlist is remembered per vibe `run` (sessionStorage `swave-source`).
+- **Add to a pasted playlist**: `POST /playlists/{id}/add` appends only songs not already in it, by id *or* by normalised title+artist (reads the playlist first); never removes or reorders. The source playlist is remembered per vibe `run` (localStorage `swave-source`).
+- **Importing a playlist** (`api/swave/matching.py`): today's Spotify ids often differ from the 2018 MPD ids (≈ half of popular songs). Match exact id → artist + normalised title (`deezer.norm`) → artist + title prefix ≥ 60%; most popular version wins. Needs index `tracks_artist` on `lower(artist)` (created by ingest).
+
+## Client-side persistence (web)
+
+localStorage (this browser only): `swave-seed-draft` (Seed screen), `swave-results` (the vibe: list, kept, removed, name, cover, saved playlist…), `swave-source`. "Start over" (`clearAll`) wipes all three. Seed and Results screens are browser-only (`ssr: false`) because they read storage in their initial state; both are keyed by a URL param (`fresh` / `run`) to defeat Next's kept-alive <Activity> pages.
 - Save **verified working in dev mode** (2026-11-01). Fallback kept: client-side CSV export (Track name, Artist name, Album, Spotify URI), downloaded by the browser, never written into the repo.
 - Code: `api/swave/spotify.py`. Tokens: `spotify_auth` (one row, local DB only, never logged). OAuth `state` → verifier is kept in memory (10 min), so restarting the API mid-login means logging in again.
 - MPD `track_uri`s are real Spotify URIs, so they go straight into `/items`.

@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 
-// Browser-only: ResultsScreen restores tab state from sessionStorage on its first render,
+// Browser-only: ResultsScreen restores the saved vibe from localStorage on its first render,
 // which must not be compared against server-rendered HTML.
 const ResultsScreen = dynamic(() => import("./results-screen"), {
   ssr: false,

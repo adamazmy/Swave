@@ -120,6 +120,7 @@ def main() -> None:
             CREATE INDEX playlist_tracks_pid ON playlist_tracks (pid);
             CREATE EXTENSION IF NOT EXISTS pg_trgm;
             CREATE INDEX tracks_search ON tracks USING gin (lower(name || ' ' || artist) gin_trgm_ops);
+            CREATE INDEX tracks_artist ON tracks (lower(artist));  -- playlist import matching
         """)
         # Deterministic hold-out: 1,000 pseudo-random playlists with enough tracks to hide some.
         conn.execute(

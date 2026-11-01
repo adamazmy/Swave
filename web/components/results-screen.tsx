@@ -16,7 +16,7 @@ import {
 } from "@/lib/playlist";
 import { currentSession } from "@/lib/session";
 import { readSource } from "@/lib/source";
-import { readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
+import { clearAll, readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
 import { Spinner, XIcon } from "./icons";
 import SavePanel from "./save-panel";
 import TrackRow, { type PreviewState } from "./track-row";
@@ -27,8 +27,8 @@ export default function ResultsScreen() {
   const router = useRouter();
   const params = useSearchParams();
 
-  // State saved for this tab (reload / Spotify login redirect). Browser-only component, so
-  // reading sessionStorage in initialisers is safe (see results-client.tsx).
+  // Saved vibe (refresh, new tab, Spotify login redirect). Browser-only component, so
+  // reading localStorage in initialisers is safe (see results-client.tsx).
   const [restored] = useState(() => readResults(parseSeeds(params.get("seeds"))));
 
   const [seeds, setSeeds] = useState<string[]>(() => restored?.seeds ?? parseSeeds(params.get("seeds")));
@@ -134,14 +134,21 @@ export default function ResultsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Save tab state after every change.
+  // Save the vibe after every change (localStorage: survives refresh, new tabs, restarts).
   useEffect(() => {
     if (status !== "ready" || list.length === 0) return;
     writeResults({
-      seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks,
+      run, seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks,
       name, description, cover, alpha, saved,
     });
-  }, [status, seeds, slider, list, kept, removed, seedTracks, name, description, cover, alpha, saved]);
+  }, [status, run, seeds, slider, list, kept, removed, seedTracks, name, description, cover, alpha, saved]);
+
+  function startOver() {
+    audio.current?.pause();
+    clearAll();
+    // `fresh` remounts the (kept-alive) Seed screen so it starts empty; see seed-client.tsx.
+    router.push(`/?fresh=${Date.now().toString(36)}`);
+  }
 
   // Slider: re-rank from the change handler (debounced while dragging). Not an effect: effects
   // also run on mount (twice in dev StrictMode), which caused an unwanted re-rank on open.
@@ -284,10 +291,25 @@ export default function ResultsScreen() {
     <div className="space-y-6">
       <header className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-300">← New vibe</Link>
+          {/* `fresh` remounts the kept-alive Seed screen so it re-reads the saved draft and vibe. */}
+          <button
+            onClick={() => router.push(`/?fresh=${Date.now().toString(36)}`)}
+            className="block text-sm text-zinc-500 hover:text-zinc-300"
+          >
+            ← Edit seeds
+          </button>
           <h1 className="text-2xl font-semibold tracking-tight">Your vibe</h1>
         </div>
-        <span className="pt-6 text-sm text-zinc-400 tabular-nums">{kept.size} kept</span>
+        <div className="flex flex-col items-end gap-1 pt-1">
+          <button
+            onClick={startOver}
+            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-white/5"
+            title="Forget this vibe, its kept songs and the pasted playlist"
+          >
+            Start over
+          </button>
+          <span className="text-sm text-zinc-400 tabular-nums">{kept.size} kept</span>
+        </div>
       </header>
 
       <section aria-label="Seeds" className="flex flex-wrap gap-2">

@@ -208,10 +208,20 @@ def update_playlist(conn: psycopg.Connection, http: httpx.Client, playlist_id: s
 
 
 def add_new_items(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
-                  uris: list[str]) -> dict:
-    """Append the `uris` that aren't in the playlist yet; existing songs are never touched."""
-    existing = set(playlist_track_uris(conn, http, playlist_id, cap=10_000))
-    new = [u for u in dict.fromkeys(uris) if u not in existing]
+                  uris: list[str], keys: dict[str, tuple[str, str]] | None = None) -> dict:
+    """Append the `uris` that aren't in the playlist yet; existing songs are never touched.
+
+    `keys` (uri -> normalised (title, artist), see matching.song_key) also skips a song that
+    is already there under a different Spotify id (remaster / re-release).
+    """
+    from swave.matching import song_key  # local import keeps spotify.py free of DB matching
+
+    items = playlist_items(conn, http, playlist_id, cap=10_000)
+    existing = {i["uri"] for i in items}
+    existing_keys = {song_key(i["name"], a) for i in items for a in i["artists"]}
+    keys = keys or {}
+    new = [u for u in dict.fromkeys(uris)
+           if u not in existing and keys.get(u) not in existing_keys]
     for i in range(0, len(new), BATCH):
         call(conn, http, "POST", f"/playlists/{playlist_id}/items", json={"uris": new[i:i + BATCH]})
     return {"id": playlist_id, "url": f"https://open.spotify.com/playlist/{playlist_id}",
@@ -234,21 +244,28 @@ def parse_playlist_id(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def playlist_track_uris(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
-                        cap: int = 500) -> list[str]:
-    """Track URIs of one of the user's own/collaborative playlists, in order (max `cap`)."""
-    uris: list[str] = []
+def playlist_items(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
+                   cap: int = 500) -> list[dict]:
+    """Songs of one of the user's own/collaborative playlists, in order (max `cap`):
+    [{"uri", "name", "artists": [...]}]. Episodes and local files are skipped."""
+    out: list[dict] = []
     offset = 0
-    while len(uris) < cap:
+    while len(out) < cap:
         page = call(conn, http, "GET", f"/playlists/{playlist_id}/items",
                     params={"limit": 50, "offset": offset, "additional_types": "track",
-                            "fields": "items(item(uri)),next"}).json()
+                            "fields": "items(item(uri,name,artists(name))),next"}).json()
         items = page.get("items", [])
         for it in items:
-            uri = (it.get("item") or it.get("track") or {}).get("uri") or ""
-            if uri.startswith("spotify:track:"):
-                uris.append(uri)
+            t = it.get("item") or it.get("track") or {}
+            if (t.get("uri") or "").startswith("spotify:track:"):
+                out.append({"uri": t["uri"], "name": t.get("name") or "",
+                            "artists": [a.get("name") or "" for a in t.get("artists") or []]})
         if not page.get("next") or not items:
             break
         offset += len(items)  # advance by what we actually got, not the requested limit
-    return uris[:cap]
+    return out[:cap]
+
+
+def playlist_track_uris(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
+                        cap: int = 500) -> list[str]:
+    return [i["uri"] for i in playlist_items(conn, http, playlist_id, cap)]
