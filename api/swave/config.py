@@ -25,8 +25,12 @@ def mpd_path() -> Path:
     return path if path.is_absolute() else ROOT / path
 
 
-def connect() -> psycopg.Connection:
+def database_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise SystemExit("DATABASE_URL is not set. Copy .env.example to .env and fill it in.")
-    return psycopg.connect(url)
+    return url
+
+
+def connect() -> psycopg.Connection:
+    return psycopg.connect(database_url())

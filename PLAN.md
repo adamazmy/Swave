@@ -32,6 +32,12 @@ Loop: seed → recommend → refine → save. Each milestone ends with: tests + 
 - `make eval`: 1,000 held-out playlists (≥ 10 tracks, `md5(pid)` order, made by ingest), 5 random seeds per playlist (RNG seeded by pid), hit-rate@50 + recall@50 on the rest. Neighbours computed on the fly with the build-index function, so no index build is needed to compare configs. Prints one line, appends to `eval/results.csv`. Run for cosine and PMI (and a small alpha sweep); keep the winner.
 - Tests: pytest on a synthetic 6-playlist fixture (scoring, pruning, metrics).
 
+## M2 result (2026-11-01): done
+
+- `/search` ~6 ms, `/recommend` (50 results) ~8 ms on the full index; `/events`, `/preview` (Deezer, cached), `/health`.
+- `events` and `previews` are created by the API at startup and survive re-ingest (keyed by `track_uri`).
+- 30 tests (13 pipeline + 17 API on a throwaway `swave_test` DB, Deezer mocked).
+
 ## M2: FastAPI
 
 - `GET /search?q=`: trigram search on name/artist, ranked by `playlist_count`, limit 20.

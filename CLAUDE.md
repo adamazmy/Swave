@@ -81,7 +81,7 @@ make feedback            # weekly keep rate, most-removed tracks/artists
 
 ## Deezer previews
 
-`GET https://api.deezer.com/search?q=artist:"…" track:"…"` → cache `deezer_id`. Deezer preview URLs are **signed and expire**, so cache the id and fetch a fresh URL from `/track/{id}` on demand. Misses are cached (`matched=false`) and re-tried after 30 days. Never block results on Deezer.
+Deezer's advanced syntax (`q=artist:"…" track:"…"`) returns **0 results** as of 2026-11, so search plain `q="<artist> <title>"` and pick the candidate ourselves (`deezer.pick`: same artist; exact title > title without (Live)/remaster suffix > prefix match; otherwise no match) → cache `deezer_id`. Deezer preview URLs are **signed and expire**, so cache the id and fetch a fresh URL from `/track/{id}` on demand. Misses are cached (`matched=false`) and re-tried after 30 days. Never block results on Deezer.
 
 ## Data licence
 
