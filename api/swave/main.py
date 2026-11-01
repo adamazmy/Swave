@@ -105,19 +105,41 @@ class SaveIn(BaseModel):
     # Set to update a playlist Swave saved before (rename + replace its songs) instead of
     # creating a new one.
     playlist_id: str | None = Field(None, pattern=r"^[A-Za-z0-9]{22}$")
+    public: bool = False
+    # Custom cover: base64 JPEG without the data: prefix, max 256 KB (Spotify's limit).
+    cover_jpeg: str | None = Field(None, min_length=100, max_length=spotify.MAX_COVER_B64,
+                                   pattern=r"^[A-Za-z0-9+/]+=*$")
 
 
 class SaveOut(BaseModel):
     id: str
     url: str | None
     added: int
+    cover_error: str | None = None  # the playlist is saved even if the cover upload fails
+
+
+class AddIn(BaseModel):
+    track_uris: list[TrackUri] = Field(min_length=1, max_length=500)
+
+
+class AddOut(BaseModel):
+    id: str
+    url: str
+    added: int
+    skipped: int  # already in the playlist
 
 
 class ImportIn(BaseModel):
     url: str = Field(min_length=10, max_length=300)
 
 
+class SourcePlaylist(BaseModel):
+    id: str
+    name: str
+
+
 class ImportOut(BaseModel):
+    playlist: SourcePlaylist
     tracks: list[Track]  # tracks of the playlist that are in our index, playlist order
     total: int  # tracks in the Spotify playlist
     missing: int  # not in the dataset index
@@ -127,6 +149,7 @@ class AuthStatus(BaseModel):
     configured: bool
     connected: bool
     display_name: str | None
+    can_upload_cover: bool  # false for logins made before the ugc-image-upload scope existed
 
 
 def reason(hits: int, n_seeds: int, co: int) -> str:
@@ -318,9 +341,10 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
     @app.get("/auth/status", response_model=AuthStatus)
     def auth_status():
         with pool.connection() as conn:
-            name = spotify.status(conn)
+            st = spotify.status(conn)
         return AuthStatus(configured=bool(os.environ.get("SPOTIFY_CLIENT_ID", "").strip()),
-                          connected=name is not None, display_name=name)
+                          connected=st is not None, display_name=st[0] if st else None,
+                          can_upload_cover=bool(st and st[1]))
 
     @app.post("/auth/logout", status_code=204)
     def auth_logout():
@@ -333,12 +357,38 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
         with pool.connection() as conn:
             try:
                 if body.playlist_id:
-                    return SaveOut(**spotify.update_playlist(
-                        conn, http, body.playlist_id, body.name, body.description, uris))
-                return SaveOut(**spotify.create_playlist(conn, http, body.name, body.description, uris))
+                    out = SaveOut(**spotify.update_playlist(
+                        conn, http, body.playlist_id, body.name, body.description, uris, body.public))
+                else:
+                    out = SaveOut(**spotify.create_playlist(
+                        conn, http, body.name, body.description, uris, body.public))
             except spotify.SpotifyError as e:
                 if body.playlist_id and e.status == 404:
                     raise HTTPException(404, "That playlist no longer exists; save it as new") from None
+                raise http_error(e) from None
+            except spotify.NotConnected as e:
+                raise http_error(e) from None
+            if body.cover_jpeg:
+                try:
+                    spotify.upload_cover(conn, http, out.id, body.cover_jpeg)
+                except spotify.SpotifyError as e:
+                    out.cover_error = ("Reconnect Spotify to allow cover uploads" if e.status in (401, 403)
+                                       else f"Cover upload failed: {e.message}")
+                except spotify.NotConnected:
+                    out.cover_error = "Reconnect Spotify to upload the cover"
+            return out
+
+    @app.post("/playlists/{playlist_id}/add", response_model=AddOut, status_code=201)
+    def add_to_playlist(playlist_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9]{22}$")],
+                        body: AddIn):
+        """Append kept songs to one of your playlists, skipping songs already in it."""
+        with pool.connection() as conn:
+            try:
+                return AddOut(**spotify.add_new_items(conn, http, playlist_id, body.track_uris))
+            except spotify.SpotifyError as e:
+                if e.status in (403, 404):
+                    raise HTTPException(403, "Spotify only lets Swave change playlists you own or "
+                                             "collaborate on") from None
                 raise http_error(e) from None
             except spotify.NotConnected as e:
                 raise http_error(e) from None
@@ -351,6 +401,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
         with pool.connection() as conn:
             try:
                 uris = spotify.playlist_track_uris(conn, http, pid)
+                name = spotify.playlist_name(conn, http, pid)
             except spotify.SpotifyError as e:
                 if e.status in (403, 404):  # dev mode: only playlists you own or collaborate on
                     raise HTTPException(403, "Spotify only lets Swave read playlists you own or "
@@ -365,6 +416,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
         known = {r[0]: r for r in rows}
         tracks = [Track(track_uri=r[0], name=r[1], artist=r[2], album=r[3], playlist_count=r[4])
                   for u in uris if (r := known.get(u))]
-        return ImportOut(tracks=tracks, total=len(uris), missing=len(uris) - len(tracks))
+        return ImportOut(playlist=SourcePlaylist(id=pid, name=name), tracks=tracks,
+                         total=len(uris), missing=len(uris) - len(tracks))
 
     return app

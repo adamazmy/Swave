@@ -33,7 +33,7 @@ Every action in the app (shown, seeded, previewed, kept, removed, more like this
 1. **Seed**: search and pick 1–5 songs, then *Find songs*.
    Or paste a link to one of **your own** Spotify playlists (Spotify dev mode only allows playlists you own or collaborate on): its first 5 songs that are in the dataset become the seeds.
 2. **Results**: 40 songs with a 30-second preview and a reason each. ✓ keeps a song, ＋ "more like this" adds it as a seed (and keeps it), ✕ removes it and pulls in the next best. The **Familiar ↔ Adventurous** slider moves the list's median popularity evenly (log scale) from fully familiar to as adventurous as that vibe allows; the API picks the alpha (0–2) that gets there. Kept songs stay on top when the list re-ranks, and survive a reload (stored for the browser tab).
-3. **Save**: the bar at the bottom saves the kept songs as a **private** Spotify playlist (*Connect Spotify* first). Saving again **updates the same playlist** (name + songs); *Save as new playlist* makes another one. *Export CSV* (Track name, Artist name, Album, Spotify URI) works for playlist-transfer tools.
+3. **Save**: the bar at the bottom saves the kept songs as a Spotify playlist (*Connect Spotify* first; *Customise* sets a description and a cover you upload or generate). With a pasted playlist you can also *Add to* it instead: new songs are appended, ones already there are skipped. Note: Spotify currently makes app-created playlists public; switch them to private in the Spotify app. Saving again **updates the same playlist** (name + songs); *Save as new playlist* makes another one. *Export CSV* (Track name, Artist name, Album, Spotify URI) works for playlist-transfer tools.
 
 ## API
 

@@ -14,6 +14,8 @@ export type StoredResults = {
   removed: string[];
   seedTracks: Track[];
   name: string;
+  description: string;
+  cover: string | null; // base64 JPEG (no data: prefix), ≤ 256 KB
   alpha: number; // exponent the API picked for the current list (reused for replacements)
   saved: SavedPlaylist | null; // playlist this vibe was saved to: later saves update it
 };

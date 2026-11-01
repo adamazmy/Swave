@@ -15,6 +15,7 @@ import {
   clampSlider,
 } from "@/lib/playlist";
 import { currentSession } from "@/lib/session";
+import { readSource } from "@/lib/source";
 import { readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
 import { Spinner, XIcon } from "./icons";
 import SavePanel from "./save-panel";
@@ -44,6 +45,10 @@ export default function ResultsScreen() {
   const [status, setStatus] = useState<Status>(() => (restored || !seeds.length ? "ready" : "loading"));
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(() => restored?.name ?? "");
+  const [description, setDescription] = useState(() => restored?.description ?? "Built with Swave");
+  const [cover, setCover] = useState<string | null>(() => restored?.cover ?? null);
+  // Playlist the vibe was imported from (set by the Seed screen): offers "Add to <name>".
+  const [source] = useState(() => readSource(params.get("run")));
   // Alpha the API picked for the current list: replacements must use the same one.
   const [alpha, setAlpha] = useState(() => restored?.alpha ?? 0);
   // Playlist this vibe was saved to: the next save updates it instead of making a duplicate.
@@ -132,8 +137,11 @@ export default function ResultsScreen() {
   // Save tab state after every change.
   useEffect(() => {
     if (status !== "ready" || list.length === 0) return;
-    writeResults({ seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks, name, alpha, saved });
-  }, [status, seeds, slider, list, kept, removed, seedTracks, name, alpha, saved]);
+    writeResults({
+      seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks,
+      name, description, cover, alpha, saved,
+    });
+  }, [status, seeds, slider, list, kept, removed, seedTracks, name, description, cover, alpha, saved]);
 
   // Slider: re-rank from the change handler (debounced while dragging). Not an effect: effects
   // also run on mount (twice in dev StrictMode), which caused an unwanted re-rank on open.
@@ -375,11 +383,16 @@ export default function ResultsScreen() {
       {status === "ready" && list.length > 0 && (
         <SavePanel
           tracks={list.filter((t) => kept.has(t.track_uri))}
-          name={name}
-          onNameChange={setName}
+          details={{ name, description, cover }}
+          onDetails={(d) => {
+            if (d.name !== undefined) setName(d.name);
+            if (d.description !== undefined) setDescription(d.description);
+            if (d.cover !== undefined) setCover(d.cover);
+          }}
+          source={source}
           saved={saved}
           onSaved={(playlist) => {
-            setSaved(playlist);
+            if (playlist) setSaved(playlist);
             log(
               list
                 .map((t, i) => ({ action: "saved" as const, track_uri: t.track_uri, position: i }))

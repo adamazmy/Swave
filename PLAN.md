@@ -74,6 +74,14 @@ Loop: seed → recommend → refine → save. Each milestone ends with: tests + 
 
 Follow-ups (not now): recommender v2 deeper candidate pool so popular vibes can get more adventurous.
 
+## Owner requests round 2 (2026-11-01): done, verified on real Spotify
+
+1. Pasted playlist → pick seeds from its in-dataset songs (scrollable list), not the first 5.
+2. "Add to “<pasted playlist>”" save tab: appends new songs only (owner's choice); 2nd click added 0, "(2 already there)".
+3. New playlist "Customise": description + cover (upload → 640×640 JPEG under 256 KB, or generated gradient with the name). Cover verified in Spotify after reconnecting for `ugc-image-upload`.
+   - Dropped the "public/private" option: Spotify ignores `public: false` for app-created playlists (create and update both verified). Users switch to private in the Spotify app.
+4. Found while testing: the source playlist leaked into other vibes of the same tab (Back); now tied to the vibe's run id.
+
 ## M4: Spotify OAuth + save
 
 - PKCE login → refresh token in `spotify_auth`. Save = `POST /me/playlists` + `POST /playlists/{id}/items` (batches of 100).

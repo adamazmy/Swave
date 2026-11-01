@@ -22,7 +22,9 @@ import psycopg
 ACCOUNTS = "https://accounts.spotify.com"
 API = "https://api.spotify.com/v1"
 SCOPES = ("playlist-modify-private playlist-modify-public "
-          "playlist-read-private playlist-read-collaborative")
+          "playlist-read-private playlist-read-collaborative ugc-image-upload")
+COVER_SCOPE = "ugc-image-upload"
+MAX_COVER_B64 = 256 * 1024  # Spotify: base64 JPEG payload, max 256 KB
 BATCH = 100  # max items per add-items request
 PLAYLIST_ID = re.compile(r"playlist[/:]([A-Za-z0-9]{22})")
 
@@ -34,6 +36,7 @@ CREATE TABLE IF NOT EXISTS spotify_auth (
     expires_at    timestamptz NOT NULL,
     display_name  text
 );
+ALTER TABLE spotify_auth ADD COLUMN IF NOT EXISTS scope text;  -- granted scopes (space-separated)
 """
 
 
@@ -102,15 +105,17 @@ def _token(http: httpx.Client, data: dict) -> dict:
 def _store(conn: psycopg.Connection, tok: dict, display_name: str | None = None) -> None:
     """Upsert tokens. Spotify may omit refresh_token on refresh: keep the old one then."""
     conn.execute(
-        """INSERT INTO spotify_auth (id, access_token, refresh_token, expires_at, display_name)
-           VALUES (1, %(a)s, %(r)s, now() + make_interval(secs => %(e)s), %(d)s)
+        """INSERT INTO spotify_auth (id, access_token, refresh_token, expires_at, display_name, scope)
+           VALUES (1, %(a)s, %(r)s, now() + make_interval(secs => %(e)s), %(d)s, %(s)s)
            ON CONFLICT (id) DO UPDATE SET
                access_token  = EXCLUDED.access_token,
                refresh_token = COALESCE(NULLIF(%(r)s, ''), spotify_auth.refresh_token),
                expires_at    = EXCLUDED.expires_at,
-               display_name  = COALESCE(EXCLUDED.display_name, spotify_auth.display_name)""",
+               display_name  = COALESCE(EXCLUDED.display_name, spotify_auth.display_name),
+               scope         = COALESCE(EXCLUDED.scope, spotify_auth.scope)""",
         {"a": tok["access_token"], "r": tok.get("refresh_token") or "",
-         "e": max(0, int(tok.get("expires_in", 3600)) - 60), "d": display_name},
+         "e": max(0, int(tok.get("expires_in", 3600)) - 60), "d": display_name,
+         "s": tok.get("scope")},
     )
     # Commit now: a later error must not roll back a (possibly rotated) refresh token.
     conn.commit()
@@ -131,9 +136,12 @@ def connect(conn: psycopg.Connection, http: httpx.Client, code: str, verifier: s
     return name
 
 
-def status(conn: psycopg.Connection) -> str | None:
-    row = conn.execute("SELECT display_name FROM spotify_auth WHERE id = 1").fetchone()
-    return (row[0] or "Spotify user") if row else None
+def status(conn: psycopg.Connection) -> tuple[str, bool] | None:
+    """(display name, cover uploads allowed) or None when not connected."""
+    row = conn.execute("SELECT display_name, scope FROM spotify_auth WHERE id = 1").fetchone()
+    if not row:
+        return None
+    return row[0] or "Spotify user", COVER_SCOPE in (row[1] or "").split()
 
 
 def disconnect(conn: psycopg.Connection) -> None:
@@ -164,8 +172,9 @@ def access_token(conn: psycopg.Connection, http: httpx.Client) -> str:
 
 def call(conn: psycopg.Connection, http: httpx.Client, method: str, path: str, **kw) -> httpx.Response:
     token = access_token(conn, http)
+    headers = {"Authorization": f"Bearer {token}", **kw.pop("headers", {})}
     try:
-        r = http.request(method, f"{API}{path}", headers={"Authorization": f"Bearer {token}"}, **kw)
+        r = http.request(method, f"{API}{path}", headers=headers, **kw)
     except httpx.HTTPError as e:
         raise SpotifyError(502, f"Can't reach Spotify: {e}") from e
     if r.status_code == 401:
@@ -177,25 +186,46 @@ def call(conn: psycopg.Connection, http: httpx.Client, method: str, path: str, *
 
 
 def create_playlist(conn: psycopg.Connection, http: httpx.Client, name: str, description: str,
-                    uris: list[str]) -> dict:
-    """Private playlist with `uris` in order. Returns {id, url, added}."""
+                    uris: list[str], public: bool = False) -> dict:
+    """New playlist with `uris` in order. Returns {id, url, added}."""
     pl = call(conn, http, "POST", "/me/playlists",
-              json={"name": name, "description": description, "public": False}).json()
+              json={"name": name, "description": description, "public": public}).json()
     for i in range(0, len(uris), BATCH):
         call(conn, http, "POST", f"/playlists/{pl['id']}/items", json={"uris": uris[i:i + BATCH]})
     return {"id": pl["id"], "url": pl.get("external_urls", {}).get("spotify"), "added": len(uris)}
 
 
 def update_playlist(conn: psycopg.Connection, http: httpx.Client, playlist_id: str, name: str,
-                    description: str, uris: list[str]) -> dict:
-    """Rename a playlist and replace its songs with `uris` (first 100 via PUT, rest via POST)."""
+                    description: str, uris: list[str], public: bool = False) -> dict:
+    """Update details and replace the songs with `uris` (first 100 via PUT, rest via POST)."""
     call(conn, http, "PUT", f"/playlists/{playlist_id}",
-         json={"name": name, "description": description})
+         json={"name": name, "description": description, "public": public})
     call(conn, http, "PUT", f"/playlists/{playlist_id}/items", json={"uris": uris[:BATCH]})
     for i in range(BATCH, len(uris), BATCH):
         call(conn, http, "POST", f"/playlists/{playlist_id}/items", json={"uris": uris[i:i + BATCH]})
     return {"id": playlist_id, "url": f"https://open.spotify.com/playlist/{playlist_id}",
             "added": len(uris)}
+
+
+def add_new_items(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
+                  uris: list[str]) -> dict:
+    """Append the `uris` that aren't in the playlist yet; existing songs are never touched."""
+    existing = set(playlist_track_uris(conn, http, playlist_id, cap=10_000))
+    new = [u for u in dict.fromkeys(uris) if u not in existing]
+    for i in range(0, len(new), BATCH):
+        call(conn, http, "POST", f"/playlists/{playlist_id}/items", json={"uris": new[i:i + BATCH]})
+    return {"id": playlist_id, "url": f"https://open.spotify.com/playlist/{playlist_id}",
+            "added": len(new), "skipped": len(set(uris)) - len(new)}
+
+
+def upload_cover(conn: psycopg.Connection, http: httpx.Client, playlist_id: str, jpeg_b64: str) -> None:
+    """Set a custom cover: base64 JPEG body (max 256 KB), needs the ugc-image-upload scope."""
+    call(conn, http, "PUT", f"/playlists/{playlist_id}/images", content=jpeg_b64.encode(),
+         headers={"Content-Type": "image/jpeg"})
+
+
+def playlist_name(conn: psycopg.Connection, http: httpx.Client, playlist_id: str) -> str:
+    return call(conn, http, "GET", f"/playlists/{playlist_id}", params={"fields": "name"}).json().get("name") or "your playlist"
 
 
 def parse_playlist_id(text: str) -> str | None:

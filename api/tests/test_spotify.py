@@ -23,6 +23,9 @@ class FakeSpotify:
         self.token_calls = 0
         self.fail_items = False
         self.forbid_read = False  # dev mode: playlist owned by someone else
+        self.scope = "playlist-modify-private ugc-image-upload"
+        self.fail_cover = False
+        self.covers: dict[str, bytes] = {}
         self.playlist_items = [uri(1), "spotify:episode:fake000000000000000001", uri(2), uri(99)]
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
@@ -33,7 +36,8 @@ class FakeSpotify:
             self.token_calls += 1
             if form["grant_type"] == ["authorization_code"]:
                 assert form["code_verifier"][0] and form["client_id"] == ["test-client"]
-                return httpx.Response(200, json={"access_token": "AT1", "refresh_token": "RT1", "expires_in": 3600})
+                return httpx.Response(200, json={"access_token": "AT1", "refresh_token": "RT1",
+                                                 "expires_in": 3600, "scope": self.scope})
             if form["refresh_token"] == ["revoked"]:
                 return httpx.Response(400, json={"error": "invalid_grant"})
             return httpx.Response(200, json={"access_token": "AT2", "expires_in": 3600})  # no new RT
@@ -41,6 +45,14 @@ class FakeSpotify:
             return httpx.Response(200, json={"id": "owner", "display_name": "Test Owner"})
         if path == "/v1/me/playlists" and req.method == "POST":
             return httpx.Response(201, json={"id": "PL123", "external_urls": {"spotify": "https://open.spotify.com/playlist/PL123"}})
+        if req.method == "PUT" and path.endswith("/images"):
+            if self.fail_cover:
+                return httpx.Response(403, json={"error": {"status": 403, "message": "Insufficient client scope"}})
+            assert req.headers["content-type"] == "image/jpeg"
+            self.covers[path.split("/")[3]] = req.content
+            return httpx.Response(202)
+        if req.method == "GET" and path.count("/") == 3 and path.startswith("/v1/playlists/"):
+            return httpx.Response(200, json={"name": "My Road Trip"})
         if req.method == "PUT" and path.startswith("/v1/playlists/"):
             if "missing" in path:
                 return httpx.Response(404, json={"error": {"status": 404, "message": "Not found"}})
@@ -95,7 +107,14 @@ def test_login_redirects_with_pkce(client):
 def test_callback_connects_and_returns_to_app(client, fake):
     login(client)
     s = client.get("/auth/status").json()
-    assert s == {"configured": True, "connected": True, "display_name": "Test Owner"}
+    assert s == {"configured": True, "connected": True, "display_name": "Test Owner",
+                 "can_upload_cover": True}
+
+
+def test_old_login_without_cover_scope_is_reported(client, fake):
+    fake.scope = "playlist-modify-private"
+    login(client)
+    assert client.get("/auth/status").json()["can_upload_cover"] is False
 
 
 def test_return_to_must_be_the_web_app(client):
@@ -122,7 +141,8 @@ def test_save_creates_private_playlist_in_batches(client, fake):
     uris = [f"spotify:track:{i:022d}" for i in range(150)] + [f"spotify:track:{0:022d}"]  # one dup
     r = client.post("/save", json={"name": "My vibe", "track_uris": uris})
     assert r.status_code == 201
-    assert r.json() == {"id": "PL123", "url": "https://open.spotify.com/playlist/PL123", "added": 150}
+    assert r.json() == {"id": "PL123", "url": "https://open.spotify.com/playlist/PL123", "added": 150,
+                        "cover_error": None}
     create = next(q for q in fake.requests if q.url.path == "/v1/me/playlists")
     assert json.loads(create.content)["public"] is False
     adds = [json.loads(q.content)["uris"] for q in fake.requests if q.url.path == "/v1/playlists/PL123/items"]
@@ -138,7 +158,7 @@ def test_save_with_playlist_id_updates_instead_of_creating(client, fake):
     assert r.status_code == 201 and r.json()["id"] == pid and r.json()["added"] == 130
     assert not any(q.url.path == "/v1/me/playlists" for q in fake.requests)  # no new playlist
     calls = [(q.method, q.url.path, json.loads(q.content)) for q in fake.requests if pid in q.url.path]
-    assert calls[0] == ("PUT", f"/v1/playlists/{pid}", {"name": "Renamed", "description": "Built with Swave"})
+    assert calls[0] == ("PUT", f"/v1/playlists/{pid}", {"name": "Renamed", "description": "Built with Swave", "public": False})
     assert calls[1][:2] == ("PUT", f"/v1/playlists/{pid}/items") and len(calls[1][2]["uris"]) == 100
     assert calls[2][:2] == ("POST", f"/v1/playlists/{pid}/items") and len(calls[2][2]["uris"]) == 30
 
@@ -179,6 +199,7 @@ def test_import_maps_playlist_to_index(client):
     r = client.post("/import", json={"url": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=abc"})
     body = r.json()
     assert [t["track_uri"] for t in body["tracks"]] == [uri(1), uri(2)]  # episode skipped, 99 unknown
+    assert body["playlist"] == {"id": "37i9dQZF1DXcBWIGoYBM5M", "name": "My Road Trip"}
     assert body["total"] == 3 and body["missing"] == 1
 
 
@@ -199,3 +220,48 @@ def test_parse_playlist_id():
     assert spotify.parse_playlist_id(f"https://open.spotify.com/playlist/{pid}?si=x") == pid
     assert spotify.parse_playlist_id(f"spotify:playlist:{pid}") == pid
     assert spotify.parse_playlist_id("https://example.com") is None
+
+
+COVER = "A" * 200  # synthetic base64 payload
+
+
+def test_save_with_cover_and_public_flag(client, fake):
+    login(client)
+    r = client.post("/save", json={"name": "x", "track_uris": [uri(1)], "public": True, "cover_jpeg": COVER})
+    assert r.status_code == 201 and r.json()["cover_error"] is None
+    create = next(q for q in fake.requests if q.url.path == "/v1/me/playlists")
+    assert json.loads(create.content)["public"] is True
+    assert fake.covers["PL123"] == COVER.encode()
+
+
+def test_cover_failure_keeps_the_playlist(client, fake):
+    login(client)
+    fake.fail_cover = True
+    r = client.post("/save", json={"name": "x", "track_uris": [uri(1)], "cover_jpeg": COVER})
+    assert r.status_code == 201 and r.json()["id"] == "PL123"
+    assert "Reconnect Spotify" in r.json()["cover_error"]
+
+
+def test_cover_must_be_base64_within_256kb(client):
+    login(client)
+    too_big = "A" * (256 * 1024 + 1)
+    assert client.post("/save", json={"name": "x", "track_uris": [uri(1)], "cover_jpeg": too_big}).status_code == 422
+    assert client.post("/save", json={"name": "x", "track_uris": [uri(1)], "cover_jpeg": "<svg>" * 50}).status_code == 422
+
+
+def test_add_appends_only_new_songs(client, fake):
+    login(client)
+    pid = "37i9dQZF1DXcBWIGoYBM5M"  # fake playlist contains uri(1), uri(2), uri(99) + an episode
+    r = client.post(f"/playlists/{pid}/add", json={"track_uris": [uri(1), uri(3), uri(4), uri(3)]})
+    assert r.status_code == 201 and r.json()["added"] == 2 and r.json()["skipped"] == 1
+    adds = [json.loads(q.content)["uris"] for q in fake.requests
+            if q.method == "POST" and q.url.path == f"/v1/playlists/{pid}/items"]
+    assert adds == [[uri(3), uri(4)]]  # nothing existing touched, no PUT/replace
+    assert not any(q.method == "PUT" for q in fake.requests)
+
+
+def test_add_to_someone_elses_playlist(client, fake):
+    login(client)
+    fake.forbid_read = True
+    r = client.post("/playlists/37i9dQZF1DXcBWIGoYBM5M/add", json={"track_uris": [uri(1)]})
+    assert r.status_code == 403 and "own or collaborate" in r.json()["detail"]

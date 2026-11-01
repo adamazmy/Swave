@@ -34,7 +34,12 @@ export type AppEvent = {
   session_id?: string;
 };
 
-export type AuthStatus = { configured: boolean; connected: boolean; display_name: string | null };
+export type AuthStatus = {
+  configured: boolean;
+  connected: boolean;
+  display_name: string | null;
+  can_upload_cover: boolean;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -99,14 +104,28 @@ export const api = {
 
   logout: () => request<void>("/auth/logout", { method: "POST" }).catch(() => undefined),
 
-  save: (body: { name: string; track_uris: string[]; description?: string; playlist_id?: string }) =>
-    request<{ id: string; url: string | null; added: number }>("/save", {
+  save: (body: {
+    name: string;
+    track_uris: string[];
+    description?: string;
+    playlist_id?: string;
+    public?: boolean;
+    cover_jpeg?: string; // base64 JPEG, no data: prefix
+  }) =>
+    request<{ id: string; url: string | null; added: number; cover_error: string | null }>("/save", {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
+  /** Append songs to one of your playlists; songs already in it are skipped. */
+  addToPlaylist: (playlistId: string, trackUris: string[]) =>
+    request<{ id: string; url: string; added: number; skipped: number }>(
+      `/playlists/${encodeURIComponent(playlistId)}/add`,
+      { method: "POST", body: JSON.stringify({ track_uris: trackUris }) },
+    ),
+
   importPlaylist: (url: string) =>
-    request<{ tracks: Track[]; total: number; missing: number }>("/import", {
+    request<{ playlist: { id: string; name: string }; tracks: Track[]; total: number; missing: number }>("/import", {
       method: "POST",
       body: JSON.stringify({ url }),
     }),
