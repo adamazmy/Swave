@@ -18,6 +18,12 @@ Loop: seed → recommend → refine → save. Each milestone ends with: tests + 
 | `neighbours` (≈0.65M × 200 = ~130M rows) | **~8–12 GB**, build ~1–3 h |
 | Ingest | ~20–40 min |
 
+## M1 result (2026-11-01): done
+
+- Ingest 7.2 min: 1,000,000 playlists, 2,262,292 tracks → **594,421** after pruning, 62.8M `playlist_tracks` rows.
+- Build-index 6.5 min (cosine, k=200, min_co=2): 73.9M neighbour rows (many tracks have < 200 neighbours with co-count ≥ 2), 3.6 GB. DB total 8.8 GB.
+- Eval baseline (cosine, k=200, alpha=0): **hit-rate@50 0.908, recall@50 0.196**. PMI best 0.774 / 0.104 (min_co=50). k=100 costs ~0.7 pts of recall. Any alpha > 0 lowers offline scores (expected: the hidden tracks are popular-biased); alpha stays a UI choice.
+
 ## M1: Ingest + index + eval baseline (+ repo hygiene)
 
 - Repo hygiene first: remove Vite/Supabase starter, `.gitignore`, `.env.example`, MIT `LICENSE`, README (setup, dataset note, eval explanation, screenshot placeholder), pre-commit (gitleaks + 5 MB staged-file check), Makefile, `docker-compose.yml` (postgres:16, named volume).
