@@ -20,14 +20,16 @@ offline:  MPD slices ─▶ make ingest ─▶ make build-index ─▶ make eval
 - **Recommender v1: item-item co-occurrence.** A sparse playlist × track matrix gives, for every pair of tracks, how many playlists contain both. That count is normalised by popularity (cosine, or positive PMI), and the top-200 neighbours of each track are stored in a `neighbours` table so requests are fast.
 - **Scoring** a seed set: `Σ over seeds of sim(seed, track) / playlist_count(track)^alpha`. `alpha` is the familiar ↔ adventurous slider: 0 = no penalty for popular songs.
 
-> Status: M3 (pipeline, evaluation, API, frontend). Spotify save is in progress; see [PLAN.md](PLAN.md).
+> Status: M4 (pipeline, evaluation, API, frontend, Spotify save). Feedback scripts next; see [PLAN.md](PLAN.md).
 
 ## Using it
 
 `make dev` starts the API (:8000) and the web app on <http://localhost:3000>.
 
 1. **Seed**: search and pick 1–5 songs, then *Find songs*.
-2. **Results**: 40 songs with a 30-second preview and a reason each. ✓ keeps a song, ＋ "more like this" adds it as a seed (and keeps it), ✕ removes it and pulls in the next best. The **Familiar ↔ Adventurous** slider sets the popularity penalty (alpha 0 → 1); kept songs stay on top when the list re-ranks.
+   Or paste a link to one of **your own** Spotify playlists (Spotify dev mode only allows playlists you own or collaborate on): its first 5 songs that are in the dataset become the seeds.
+2. **Results**: 40 songs with a 30-second preview and a reason each. ✓ keeps a song, ＋ "more like this" adds it as a seed (and keeps it), ✕ removes it and pulls in the next best. The **Familiar ↔ Adventurous** slider sets the popularity penalty (alpha 0 → 1); kept songs stay on top when the list re-ranks. Your kept/removed songs survive a reload (stored for the browser tab).
+3. **Save**: the bar at the bottom saves the kept songs as a **private** Spotify playlist (*Connect Spotify* first), or exports a CSV (Track name, Artist name, Album, Spotify URI) for playlist-transfer tools.
 
 ## API
 
@@ -40,6 +42,9 @@ offline:  MPD slices ─▶ make ingest ─▶ make build-index ─▶ make eval
 | `POST /events` `{action, track_uri?, position?, slider?, session_id?}` | Logs shown / seeded / previewed / kept / removed / more_like_this / saved (`shown` = denominator of the keep rate). `POST /events/batch` takes a list |
 | `GET /preview?track_uri=` | 30-second Deezer preview URL (or `null`), match cached in Postgres |
 | `GET /health` | How the neighbour index was built |
+| `GET /auth/login` → `/auth/callback`, `GET /auth/status`, `POST /auth/logout` | Spotify login (Authorization Code + PKCE, no client secret) |
+| `POST /save` `{name, track_uris[≤500]}` | Private playlist via `POST /me/playlists` + `POST /playlists/{id}/items` (batches of 100) |
+| `POST /import` `{url}` | Songs of one of your own/collaborative playlists that are in the index |
 
 The reason's "shared playlists" count is summed over seeds, so a playlist containing two seeds counts twice.
 
@@ -48,7 +53,7 @@ The reason's "shared playlists" count is summed over seeds, so a playlist contai
 Requirements: Docker, Python 3.12, GNU make (Windows: `winget install ezwinports.make`), Node 20+ (frontend, from M3).
 
 1. **Get the dataset.** Create a free account on [AIcrowd](https://www.aicrowd.com/challenges/spotify-million-playlist-dataset-challenge), download `spotify_million_playlist_dataset.zip` and put it in `data/raw/`. You can leave it zipped (saves ~33 GB) or unzip the `mpd.slice.*.json` files into `data/raw/`.
-2. **Create a Spotify app** (needed from M4) at <https://developer.spotify.com/dashboard>. Use development mode, add redirect URI `http://127.0.0.1:8000/auth/callback` and add your own account as a user. Development mode requires the app owner to have Spotify Premium.
+2. **Create a Spotify app** at <https://developer.spotify.com/dashboard> (development mode; the owner needs Spotify Premium): tick *Web API*, add redirect URI `http://127.0.0.1:8000/auth/callback` (a loopback IP: Spotify rejects `localhost`), and add your own account under *User Management*. Copy the **Client ID** into `SPOTIFY_CLIENT_ID`; no client secret is needed.
 3. **Configure:** `cp .env.example .env` and fill in a Postgres password, `DATABASE_URL` and (later) `SPOTIFY_CLIENT_ID`.
 4. **Install:** `make setup` (Python venv, dependencies, pre-commit hooks).
 

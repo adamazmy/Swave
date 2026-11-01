@@ -80,7 +80,8 @@ make feedback            # weekly keep rate, most-removed tracks/artists
 - Create playlist: `POST /me/playlists` (`POST /users/{id}/playlists` is removed). Add tracks: `POST /playlists/{id}/items` (`/tracks` is removed).
 - Reading a pasted playlist (`GET /playlists/{id}/items`) works only for playlists the owner owns or collaborates on.
 - Search max `limit` is 10; track `popularity` is removed (we use `playlist_count` instead). App owner needs Premium.
-- If save fails in dev mode → fallback: export `exports/<name>.csv` (gitignored) for a playlist-transfer tool.
+- Save **verified working in dev mode** (2026-11-01). Fallback kept: client-side CSV export (Track name, Artist name, Album, Spotify URI), downloaded by the browser, never written into the repo.
+- Code: `api/swave/spotify.py`. Tokens: `spotify_auth` (one row, local DB only, never logged). OAuth `state` → verifier is kept in memory (10 min), so restarting the API mid-login means logging in again.
 - MPD `track_uri`s are real Spotify URIs, so they go straight into `/items`.
 
 ## Deezer previews

@@ -59,6 +59,13 @@ Loop: seed → recommend → refine → save. Each milestone ends with: tests + 
 - Screen 2 **Results**: 30–50 rows: title/artist, preview player, reason, keep / remove / more-like-this, familiar↔adventurous slider (debounced re-rank), "Save to Spotify".
 - Every action posts to `/events`.
 
+## M4 result (2026-11-01): done, verified against real Spotify
+
+- **Dev-mode save works**: real test with the owner's account created a private playlist with the 2 kept songs in order (read back via `/import`). No CSV fallback needed; CSV export is still offered as a secondary button.
+- PKCE login round-trip keeps the Results state (sessionStorage per tab; Results is client-only). Tokens in `spotify_auth`, committed immediately so an error can't roll back a rotated refresh token.
+- Paste-a-playlist on the Seed screen (own/collaborative playlists only; 403 explained).
+- Found in browser testing: the slider effect re-ranked the list on open in dev StrictMode; fixed by driving it from onChange.
+
 ## M4: Spotify OAuth + save
 
 - PKCE login → refresh token in `spotify_auth`. Save = `POST /me/playlists` + `POST /playlists/{id}/items` (batches of 100).
