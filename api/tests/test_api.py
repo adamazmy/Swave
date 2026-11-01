@@ -134,7 +134,15 @@ def test_recommend_seed_without_neighbours_returns_empty(client):
 
 def test_recommend_validation(client):
     assert client.post("/recommend", json={"seeds": []}).status_code == 422
-    assert client.post("/recommend", json={"seeds": [uri(1)], "alpha": 2}).status_code == 422
+    assert client.post("/recommend", json={"seeds": [uri(1)], "alpha": 3}).status_code == 422
+    assert client.post("/recommend", json={"seeds": [uri(1)], "adventure": 1.5}).status_code == 422
+
+
+def test_recommend_adventure_picks_alpha(client):
+    familiar = client.post("/recommend", json={"seeds": [uri(1)], "adventure": 0}).json()
+    adventurous = client.post("/recommend", json={"seeds": [uri(1)], "adventure": 1}).json()
+    assert familiar["alpha"] == 0 and familiar["results"][0]["track_uri"] == uri(2)
+    assert adventurous["alpha"] > 0 and adventurous["results"][0]["track_uri"] == uri(4)
 
 
 def test_events_logged(client, dsn):

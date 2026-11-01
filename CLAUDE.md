@@ -24,7 +24,8 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
   - `previews(track_uri PK, deezer_id, matched, checked_at)`: Deezer match cache (misses cached too)
   - `spotify_auth(id=1, refresh_token, expires_at)`: single row, owner's token
 - **Recommender v1** = item-item co-occurrence. `sim` is cosine `c_ij / sqrt(n_i·n_j)` or PMI (whichever evaluates better, recorded in `eval/results.csv`).
-  Score for seed set S: `Σ_{s∈S} sim(s, t) / playlist_count(t)^alpha`, seeds excluded. `alpha` comes from the familiar↔adventurous slider (0 = no popularity penalty).
+  Score for seed set S: `Σ_{s∈S} sim(s, t) / playlist_count(t)^alpha`, seeds excluded. The familiar↔adventurous slider (`adventure` 0..1) does **not** map to a fixed alpha: `recommend.alpha_for` binary-searches alpha ∈ [0, 2] so the top-n's median popularity moves that fraction of the way (log scale) from alpha 0 to alpha 2 for *this* seed set. A fixed mapping felt dead for popular seeds and collapsed mid-popularity ones (measured on real sessions, 2026-11-01). Replacements reuse the returned `alpha`. Eval still uses raw `alpha`.
+  Known limit: popular seeds can't get very adventurous: their top-200 cosine neighbours are themselves popular (pool saturates ~alpha 1.5). Deeper/alternative neighbour lists = recommender v2.
 - **Held-out eval set** (`eval_holdout`, made by ingest): 1,000 playlists with ≥ 10 tracks, chosen by `md5(pid)` order. They are excluded from the training matrix and `neighbours`, so eval never leaks.
 - **Eval doesn't need the index**: it computes neighbours for its ~5k seed tracks on the fly with the same `cooc.neighbours()` function (same top-k truncation) as build-index, so comparing methods/k/alpha takes minutes, not hours. The training matrix is cached in `data/cache/` (deleted by ingest).
 
@@ -43,7 +44,11 @@ api/                 Python package + FastAPI app
   tests/             pytest, synthetic fixtures only
 web/                 Next.js 16 app (2 screens: Seed, Results). Read web/AGENTS.md: this Next.js version
                      differs from older ones, check node_modules/next/dist/docs before using an API
-  app/               routes: / (seed), /results (client, inside <Suspense> for useSearchParams)
+  app/               routes: / (seed), /results (client-only, inside <Suspense> for useSearchParams)
+                     cacheComponents keeps visited pages alive in a hidden <Activity>: state is NOT
+                     reset on navigation and effects re-run when a page is shown again. Results is
+                     keyed by a `run` URL param (new per vibe) and its first-load effect is a no-op
+                     when the list already exists. Read web/node_modules/next/dist/docs/01-app/02-guides/preserving-ui-state.md
   components/        seed-screen, results-screen, track-row, icons
   lib/               api.ts (typed client), playlist.ts (pure list logic + vitest), session.ts
 eval/results.csv     metrics history (no track data)

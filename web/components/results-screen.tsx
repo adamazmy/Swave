@@ -12,10 +12,10 @@ import {
   parseSeeds,
   refreshKept,
   replaceAt,
-  sliderToAlpha,
+  clampSlider,
 } from "@/lib/playlist";
 import { currentSession } from "@/lib/session";
-import { readResults, writeResults } from "@/lib/stored";
+import { readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
 import { Spinner, XIcon } from "./icons";
 import SavePanel from "./save-panel";
 import TrackRow, { type PreviewState } from "./track-row";
@@ -34,7 +34,7 @@ export default function ResultsScreen() {
   const [slider, setSlider] = useState(() => {
     if (restored) return restored.slider;
     const v = Number(params.get("v"));
-    return Number.isFinite(v) ? sliderToAlpha(v) : 0;
+    return Number.isFinite(v) ? clampSlider(v) : 0;
   });
   const [seedTracks, setSeedTracks] = useState<Track[]>(() => restored?.seedTracks ?? []);
   const [list, setList] = useState<Recommendation[]>(() => restored?.list ?? []);
@@ -44,6 +44,16 @@ export default function ResultsScreen() {
   const [status, setStatus] = useState<Status>(() => (restored || !seeds.length ? "ready" : "loading"));
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(() => restored?.name ?? "");
+  // Alpha the API picked for the current list: replacements must use the same one.
+  const [alpha, setAlpha] = useState(() => restored?.alpha ?? 0);
+  // Playlist this vibe was saved to: the next save updates it instead of making a duplicate.
+  const [saved, setSaved] = useState<SavedPlaylist | null>(() => restored?.saved ?? null);
+  // Each new vibe has its own run id (see results-client.tsx); keep it in every URL we write.
+  const run = params.get("run");
+  const resultsUrl = useCallback(
+    (s: string[], v: number) => `/results?seeds=${s.join(",")}&v=${v}${run ? `&run=${run}` : ""}`,
+    [run],
+  );
   // Coming back from the Spotify login redirect.
   const [notice, setNotice] = useState<string | null>(() => {
     if (params.get("spotify") === "connected") return "Spotify connected. You can save your playlist now.";
@@ -78,7 +88,7 @@ export default function ResultsScreen() {
         // Kept tracks are not excluded, so they come back with up-to-date reasons.
         const res = await api.recommend({
           seeds: nextSeeds,
-          alpha: sliderToAlpha(nextSlider),
+          adventure: clampSlider(nextSlider),
           exclude: [...r],
           n: Math.min(100, LIST_SIZE + keptTracks.length),
         });
@@ -86,6 +96,7 @@ export default function ResultsScreen() {
         const merged = mergeKept(refreshKept(keptTracks, res.results, nextSeeds), res.results);
         setList(merged);
         setSeedTracks(res.seeds);
+        setAlpha(res.alpha);
         setName((n) => n || `Swave · ${res.seeds[0]?.name ?? "my vibe"}`);
         setError(null);
         setStatus("ready");
@@ -95,22 +106,23 @@ export default function ResultsScreen() {
             .map((t, i) => ({ action: "shown" as const, track_uri: t.track_uri, position: i }))
             .filter((e) => !k.has(e.track_uri)),
         );
-        router.replace(`/results?seeds=${nextSeeds.join(",")}&v=${nextSlider}`, { scroll: false });
+        router.replace(resultsUrl(nextSeeds, nextSlider), { scroll: false });
       } catch (err) {
         if (id !== requestId.current) return;
         setError(err instanceof ApiError ? err.message : "Couldn't load recommendations");
         setStatus("error");
       }
     },
-    [log, router],
+    [log, router, resultsUrl],
   );
 
-  // First load (skipped when the tab's state was restored).
+  // First load. Skipped when the list is already there: restored from the tab, or this page
+  // was only hidden by Next's <Activity> and is being shown again (effects re-run then).
   useEffect(() => {
     session.current = currentSession();
-    if (!restored && seeds.length) void load(seeds, slider);
+    if (latest.current.list.length === 0 && seeds.length) void load(seeds, slider);
     else if (params.has("spotify") || params.has("spotify_error")) {
-      router.replace(`/results?seeds=${seeds.join(",")}&v=${slider}`, { scroll: false });
+      router.replace(resultsUrl(seeds, slider), { scroll: false });
     }
     const el = audio;
     return () => el.current?.pause();
@@ -120,8 +132,8 @@ export default function ResultsScreen() {
   // Save tab state after every change.
   useEffect(() => {
     if (status !== "ready" || list.length === 0) return;
-    writeResults({ seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks, name });
-  }, [status, seeds, slider, list, kept, removed, seedTracks, name]);
+    writeResults({ seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks, name, alpha, saved });
+  }, [status, seeds, slider, list, kept, removed, seedTracks, name, alpha, saved]);
 
   // Slider: re-rank from the change handler (debounced while dragging). Not an effect: effects
   // also run on mount (twice in dev StrictMode), which caused an unwanted re-rank on open.
@@ -156,7 +168,7 @@ export default function ResultsScreen() {
     try {
       const res = await api.recommend({
         seeds,
-        alpha: sliderToAlpha(slider),
+        alpha,
         exclude: [...latest.current.list.map((x) => x.track_uri), ...nextRemoved],
         n: 1,
       });
@@ -365,13 +377,15 @@ export default function ResultsScreen() {
           tracks={list.filter((t) => kept.has(t.track_uri))}
           name={name}
           onNameChange={setName}
-          onSaved={() =>
+          saved={saved}
+          onSaved={(playlist) => {
+            setSaved(playlist);
             log(
               list
                 .map((t, i) => ({ action: "saved" as const, track_uri: t.track_uri, position: i }))
                 .filter((e) => kept.has(e.track_uri)),
-            )
-          }
+            );
+          }}
         />
       )}
     </div>

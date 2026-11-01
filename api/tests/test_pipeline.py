@@ -8,7 +8,7 @@ import pytest
 from swave import cooc
 from swave.pipeline.evaluate import metrics
 from swave.pipeline.ingest import kept_tracks, slice_rows
-from swave.recommend import score
+from swave.recommend import MAX_ALPHA, alpha_for, score
 
 # 6 made-up playlists over 5 tracks (ids 0..4). Track 0 is very popular; 1 and 2 always co-occur.
 PLAYLISTS = {
@@ -88,6 +88,28 @@ def test_alpha_penalises_popular_tracks():
     pop = np.array([10_000, 10])
     assert score(nbr, sim, co, pop, 0.0, np.array([]), 2).track[0] == 1
     assert score(nbr, sim, co, pop, 0.5, np.array([]), 2).track[0] == 2
+
+
+def test_alpha_for_spreads_the_slider_evenly():
+    # 60 synthetic candidates: similarity falls slowly, popularity spans 10..100k.
+    rng = np.random.default_rng(0)
+    nbr = np.arange(60)
+    pop = np.round(10 ** rng.uniform(1, 5, 60))
+    sim = np.sort(rng.uniform(0.2, 0.6, 60))[::-1]
+    co = np.ones(60)
+    args = (nbr, sim, co, pop, np.array([]), 20)
+    assert alpha_for(0.0, *args) == 0.0
+    alphas = [alpha_for(a, *args) for a in (0.25, 0.5, 0.75, 1.0)]
+    assert alphas == sorted(alphas) and 0 < alphas[0] and alphas[-1] <= MAX_ALPHA
+    med = lambda a: np.median(score(nbr, sim, co, pop, a, np.array([]), 20).pop)  # noqa: E731
+    lo, mid, hi = med(0.0), med(alpha_for(0.5, *args)), med(MAX_ALPHA)
+    # halfway on the slider ≈ halfway in log-popularity between the two ends
+    assert abs(np.log(mid) - (np.log(lo) + np.log(hi)) / 2) < 0.35 * (np.log(lo) - np.log(hi))
+
+
+def test_alpha_for_flat_popularity():
+    nbr, sim, co, pop = np.arange(5), np.ones(5), np.ones(5), np.full(5, 100.0)
+    assert alpha_for(0.5, nbr, sim, co, pop, np.array([]), 3) == pytest.approx(0.5 * MAX_ALPHA)
 
 
 def test_score_empty():

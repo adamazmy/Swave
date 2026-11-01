@@ -66,6 +66,14 @@ Loop: seed → recommend → refine → save. Each milestone ends with: tests + 
 - Paste-a-playlist on the Seed screen (own/collaborative playlists only; 403 explained).
 - Found in browser testing: the slider effect re-ranked the list on open in dev StrictMode; fixed by driving it from onChange.
 
+## Owner test round 1 (2026-11-01): fixed
+
+1. *"To change the vibe I need to refresh"*: Next's <Activity> reused the hidden Results page. Fixed with a per-vibe `run` key; the page also no longer reloads when shown again (that had logged duplicate `shown` events: the owner's session has 674).
+2. *"Slider stays the same until it gets extreme"*: measured on the owner's 4 seed sets; fixed alpha behaved very differently per set. Now `adventure` → per-set alpha (`alpha_for`): first step swaps ~7/40 songs on popular vibes (was 1–2), mid vibes no longer collapse at 0.5.
+3. *"Every save creates a new playlist"*: saves now update the vibe's playlist (rename + replace songs); "Save as new playlist" is explicit. Double-click verified: one playlist, songs replaced.
+
+Follow-ups (not now): recommender v2 deeper candidate pool so popular vibes can get more adventurous.
+
 ## M4: Spotify OAuth + save
 
 - PKCE login → refresh token in `spotify_auth`. Save = `POST /me/playlists` + `POST /playlists/{id}/items` (batches of 100).

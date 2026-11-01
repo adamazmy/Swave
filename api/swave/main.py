@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from swave import deezer, spotify
 from swave.config import database_url
-from swave.recommend import score
+from swave.recommend import MAX_ALPHA, alpha_for, score
 
 TRACK_URI = r"^spotify:track:[A-Za-z0-9]{22}$"
 ACTIONS = ("shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved")
@@ -67,7 +67,10 @@ class Recommendation(Track):
 
 class RecommendIn(BaseModel):
     seeds: list[str] = Field(min_length=1, max_length=10)
-    alpha: float = Field(0.0, ge=0.0, le=1.0, description="0 = familiar … 1 = adventurous")
+    alpha: float = Field(0.0, ge=0.0, le=MAX_ALPHA, description="popularity exponent (raw)")
+    adventure: float | None = Field(
+        None, ge=0.0, le=1.0,
+        description="slider 0 = familiar … 1 = adventurous; overrides alpha (see alpha_for)")
     exclude: list[str] = Field(default_factory=list, max_length=1000)
     n: int = Field(50, ge=1, le=100)
 
@@ -76,6 +79,7 @@ class RecommendOut(BaseModel):
     results: list[Recommendation]
     seeds: list[Track]  # known seeds, in request order
     unknown_seeds: list[str]
+    alpha: float  # the exponent actually used (reuse it for replacements)
 
 
 class EventIn(BaseModel):
@@ -98,6 +102,9 @@ class SaveIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field("Built with Swave", max_length=300)
     track_uris: list[TrackUri] = Field(min_length=1, max_length=500)
+    # Set to update a playlist Swave saved before (rename + replace its songs) instead of
+    # creating a new one.
+    playlist_id: str | None = Field(None, pattern=r"^[A-Za-z0-9]{22}$")
 
 
 class SaveOut(BaseModel):
@@ -220,8 +227,10 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
             ).fetchall()
             arr = np.array(rows, dtype=np.float64).reshape(-1, 4)
             exclude = np.array(seed_ids + [ids[u] for u in body.exclude if u in ids])
-            res = score(arr[:, 0].astype(np.int64), arr[:, 1], arr[:, 2], arr[:, 3],
-                        body.alpha, exclude, body.n)
+            cand = (arr[:, 0].astype(np.int64), arr[:, 1], arr[:, 2], arr[:, 3])
+            alpha = body.alpha if body.adventure is None else alpha_for(
+                body.adventure, *cand, exclude, body.n)
+            res = score(*cand, alpha, exclude, body.n)
             meta = {r[0]: r[1:] for r in conn.execute(
                 """SELECT track_id, track_uri, name, artist, album, playlist_count
                    FROM tracks WHERE track_id = ANY(%s)""",
@@ -243,7 +252,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
             )
             for t, s, h, c in zip(res.track.tolist(), res.score, res.seed_hits, res.co_count)
         ]
-        return RecommendOut(results=results, seeds=seeds, unknown_seeds=unknown)
+        return RecommendOut(results=results, seeds=seeds, unknown_seeds=unknown, alpha=alpha)
 
     insert_event = """INSERT INTO events (session_id, action, track_uri, position, slider)
                       VALUES (%s, %s, %s, %s, %s)"""
@@ -323,8 +332,15 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
         uris = list(dict.fromkeys(body.track_uris))  # dedupe, keep order
         with pool.connection() as conn:
             try:
+                if body.playlist_id:
+                    return SaveOut(**spotify.update_playlist(
+                        conn, http, body.playlist_id, body.name, body.description, uris))
                 return SaveOut(**spotify.create_playlist(conn, http, body.name, body.description, uris))
-            except (spotify.SpotifyError, spotify.NotConnected) as e:
+            except spotify.SpotifyError as e:
+                if body.playlist_id and e.status == 404:
+                    raise HTTPException(404, "That playlist no longer exists; save it as new") from None
+                raise http_error(e) from None
+            except spotify.NotConnected as e:
                 raise http_error(e) from None
 
     @app.post("/import", response_model=ImportOut)

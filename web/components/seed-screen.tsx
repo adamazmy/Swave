@@ -94,7 +94,8 @@ export default function SeedScreen() {
     clearResults();
     const session = newSession();
     api.log(seeds.map((s, i) => ({ action: "seeded", track_uri: s.track_uri, position: i, session_id: session })));
-    router.push(`/results?seeds=${seeds.map((s) => s.track_uri).join(",")}`);
+    // A fresh `run` per vibe makes the (kept-alive) Results page start over; see results-client.
+    router.push(`/results?seeds=${seeds.map((s) => s.track_uri).join(",")}&run=${session.slice(0, 8)}`);
   }
 
   return (

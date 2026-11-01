@@ -41,6 +41,10 @@ class FakeSpotify:
             return httpx.Response(200, json={"id": "owner", "display_name": "Test Owner"})
         if path == "/v1/me/playlists" and req.method == "POST":
             return httpx.Response(201, json={"id": "PL123", "external_urls": {"spotify": "https://open.spotify.com/playlist/PL123"}})
+        if req.method == "PUT" and path.startswith("/v1/playlists/"):
+            if "missing" in path:
+                return httpx.Response(404, json={"error": {"status": 404, "message": "Not found"}})
+            return httpx.Response(200, json={"snapshot_id": "s"} if path.endswith("/items") else None)
         if path.endswith("/items") and req.method == "POST":
             if self.fail_items:
                 return httpx.Response(403, json={"error": {"status": 403, "message": "Forbidden"}})
@@ -124,6 +128,25 @@ def test_save_creates_private_playlist_in_batches(client, fake):
     adds = [json.loads(q.content)["uris"] for q in fake.requests if q.url.path == "/v1/playlists/PL123/items"]
     assert [len(a) for a in adds] == [100, 50]
     assert create.headers["authorization"] == "Bearer AT1"
+
+
+def test_save_with_playlist_id_updates_instead_of_creating(client, fake):
+    login(client)
+    pid = "A" * 22
+    uris = [f"spotify:track:{i:022d}" for i in range(130)]
+    r = client.post("/save", json={"name": "Renamed", "track_uris": uris, "playlist_id": pid})
+    assert r.status_code == 201 and r.json()["id"] == pid and r.json()["added"] == 130
+    assert not any(q.url.path == "/v1/me/playlists" for q in fake.requests)  # no new playlist
+    calls = [(q.method, q.url.path, json.loads(q.content)) for q in fake.requests if pid in q.url.path]
+    assert calls[0] == ("PUT", f"/v1/playlists/{pid}", {"name": "Renamed", "description": "Built with Swave"})
+    assert calls[1][:2] == ("PUT", f"/v1/playlists/{pid}/items") and len(calls[1][2]["uris"]) == 100
+    assert calls[2][:2] == ("POST", f"/v1/playlists/{pid}/items") and len(calls[2][2]["uris"]) == 30
+
+
+def test_update_of_a_vanished_playlist_says_so(client):
+    login(client)
+    r = client.post("/save", json={"name": "x", "track_uris": [uri(1)], "playlist_id": "missing" + "A" * 15})
+    assert r.status_code == 404 and "save it as new" in r.json()["detail"]
 
 
 def test_save_reports_spotify_errors(client, fake):

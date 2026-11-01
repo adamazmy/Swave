@@ -6,7 +6,7 @@ import {
   refreshKept,
   replaceAt,
   sameSet,
-  sliderToAlpha,
+  clampSlider,
   slug,
   toCsv,
 } from "./playlist";
@@ -85,10 +85,10 @@ describe("sameSet / slug", () => {
   });
 });
 
-describe("sliderToAlpha", () => {
+describe("clampSlider", () => {
   it("clamps to 0..1", () => {
-    expect(sliderToAlpha(-1)).toBe(0);
-    expect(sliderToAlpha(0.4)).toBe(0.4);
-    expect(sliderToAlpha(3)).toBe(1);
+    expect(clampSlider(-1)).toBe(0);
+    expect(clampSlider(0.4)).toBe(0.4);
+    expect(clampSlider(3)).toBe(1);
   });
 });

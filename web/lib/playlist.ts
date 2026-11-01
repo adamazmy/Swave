@@ -19,8 +19,8 @@ export function parseSeeds(param: string | null): string[] {
   return [...seen].slice(0, MAX_SEEDS);
 }
 
-/** Slider 0..1 → popularity exponent alpha (0 = familiar, 1 = adventurous). */
-export function sliderToAlpha(slider: number): number {
+/** Clamp the familiar (0) ↔ adventurous (1) slider; the API turns it into alpha per seed set. */
+export function clampSlider(slider: number): number {
   return Math.min(1, Math.max(0, slider));
 }
 

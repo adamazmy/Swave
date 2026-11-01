@@ -14,7 +14,11 @@ export type StoredResults = {
   removed: string[];
   seedTracks: Track[];
   name: string;
+  alpha: number; // exponent the API picked for the current list (reused for replacements)
+  saved: SavedPlaylist | null; // playlist this vibe was saved to: later saves update it
 };
+
+export type SavedPlaylist = { id: string; url: string | null };
 
 /** Saved state for these seeds, or null (different seeds, nothing saved, storage blocked). */
 export function readResults(seeds: string[]): StoredResults | null {

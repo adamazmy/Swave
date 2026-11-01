@@ -186,6 +186,18 @@ def create_playlist(conn: psycopg.Connection, http: httpx.Client, name: str, des
     return {"id": pl["id"], "url": pl.get("external_urls", {}).get("spotify"), "added": len(uris)}
 
 
+def update_playlist(conn: psycopg.Connection, http: httpx.Client, playlist_id: str, name: str,
+                    description: str, uris: list[str]) -> dict:
+    """Rename a playlist and replace its songs with `uris` (first 100 via PUT, rest via POST)."""
+    call(conn, http, "PUT", f"/playlists/{playlist_id}",
+         json={"name": name, "description": description})
+    call(conn, http, "PUT", f"/playlists/{playlist_id}/items", json={"uris": uris[:BATCH]})
+    for i in range(BATCH, len(uris), BATCH):
+        call(conn, http, "POST", f"/playlists/{playlist_id}/items", json={"uris": uris[i:i + BATCH]})
+    return {"id": playlist_id, "url": f"https://open.spotify.com/playlist/{playlist_id}",
+            "added": len(uris)}
+
+
 def parse_playlist_id(text: str) -> str | None:
     """Playlist id from an open.spotify.com link or a spotify:playlist: URI."""
     m = PLAYLIST_ID.search(text.strip())

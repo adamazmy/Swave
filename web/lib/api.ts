@@ -74,8 +74,15 @@ export const api = {
   search: (q: string, signal?: AbortSignal) =>
     request<Track[]>(`/search?${new URLSearchParams({ q, limit: "15" })}`, { signal }),
 
-  recommend: (body: { seeds: string[]; alpha: number; exclude?: string[]; n?: number }) =>
-    request<{ results: Recommendation[]; seeds: Track[]; unknown_seeds: string[] }>("/recommend", {
+  /** `adventure` (slider 0..1) lets the API pick alpha per seed set; pass `alpha` to reuse one. */
+  recommend: (body: {
+    seeds: string[];
+    adventure?: number;
+    alpha?: number;
+    exclude?: string[];
+    n?: number;
+  }) =>
+    request<{ results: Recommendation[]; seeds: Track[]; unknown_seeds: string[]; alpha: number }>("/recommend", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -92,7 +99,7 @@ export const api = {
 
   logout: () => request<void>("/auth/logout", { method: "POST" }).catch(() => undefined),
 
-  save: (body: { name: string; track_uris: string[]; description?: string }) =>
+  save: (body: { name: string; track_uris: string[]; description?: string; playlist_id?: string }) =>
     request<{ id: string; url: string | null; added: number }>("/save", {
       method: "POST",
       body: JSON.stringify(body),
