@@ -1,0 +1,58 @@
+# PLAN.md: Swave MVP
+
+Loop: seed → recommend → refine → save. Each milestone ends with: tests + `make eval` → commit → 5-line summary → wait for go-ahead.
+
+## Environment facts (checked 2026-11-01)
+
+- Machine: i7-12700H (20 threads), 16 GB RAM, ~105 GB free on C:. Docker 29.3 installed (Desktop must be running). Python 3.12.2 via `py -3.12`. GNU make: to install (`winget install ezwinports.make`).
+- Dataset: `spotify_million_playlist_dataset.zip` (5.8 GB zipped, **33.5 GB unzipped**, 1,000 slices). Owner chose **all 1,000 slices**.
+- Repo currently holds the Vite + React + Supabase starter. It will be **replaced** by `api/` + `web/` (Supabase is not used by this spec; `.env.local` with Supabase keys stays local and ignored).
+
+## Size estimates (full MPD)
+
+| Thing | Rough size |
+|---|---|
+| playlists / track occurrences | 1M / ~66M rows |
+| unique tracks → after pruning (< 5 playlists) | ~2.26M → ~0.6–0.7M |
+| `playlist_tracks` in Postgres (with index) | ~4–6 GB |
+| `neighbours` (≈0.65M × 200 = ~130M rows) | **~8–12 GB**, build ~1–3 h |
+| Ingest | ~20–40 min |
+
+## M1: Ingest + index + eval baseline (+ repo hygiene)
+
+- Repo hygiene first: remove Vite/Supabase starter, `.gitignore`, `.env.example`, MIT `LICENSE`, README (setup, dataset note, eval explanation, screenshot placeholder), pre-commit (gitleaks + 5 MB staged-file check), Makefile, `docker-compose.yml` (postgres:16, named volume).
+- `make ingest`: read `mpd.slice.*.json` one slice at a time (from `data/raw/` **or directly from the zip**), `COPY` into staging tables, compute `playlist_count`, prune < 5, add indexes + `pg_trgm` index for search.
+- `make build-index`: `scipy.sparse` playlist×track CSR (held-out pids excluded), co-occurrence `XᵀX` in track chunks (bounded RAM), cosine and PMI, top-200 per track → `neighbours` via `COPY`.
+- `make eval`: 1,000 held-out playlists (≥ 10 tracks, `md5(pid)` order, made by ingest), 5 random seeds per playlist (RNG seeded by pid), hit-rate@50 + recall@50 on the rest. Neighbours computed on the fly with the build-index function, so no index build is needed to compare configs. Prints one line, appends to `eval/results.csv`. Run for cosine and PMI (and a small alpha sweep); keep the winner.
+- Tests: pytest on a synthetic 6-playlist fixture (scoring, pruning, metrics).
+
+## M2: FastAPI
+
+- `GET /search?q=`: trigram search on name/artist, ranked by `playlist_count`, limit 20.
+- `POST /recommend {seeds[], alpha, exclude[], n=50}`: scores + reason (`seed_hits`, `co_count`), e.g. "appears with 3 of your seeds in 412 shared playlists". The co-count is summed per seed, so it's an upper bound on distinct playlists; the reason text says "shared playlists".
+- `POST /events`: append-only log. `GET /preview/{track_uri}`: Deezer lookup + cache.
+- "Remove → replace" = client asks `/recommend` with removed + shown tracks in `exclude`, takes the next one.
+- Tests: endpoint tests against a throwaway test DB seeded from synthetic fixtures.
+
+## M3: Frontend (Next.js + Tailwind, dark)
+
+- Screen 1 **Seed**: search box, pick 1–5 seeds, or paste a Spotify playlist link (only works after M4 and only for own/collaborative playlists).
+- Screen 2 **Results**: 30–50 rows: title/artist, preview player, reason, keep / remove / more-like-this, familiar↔adventurous slider (debounced re-rank), "Save to Spotify".
+- Every action posts to `/events`.
+
+## M4: Spotify OAuth + save
+
+- PKCE login → refresh token in `spotify_auth`. Save = `POST /me/playlists` + `POST /playlists/{id}/items` (batches of 100).
+- First task: a real test save in dev mode. If it fails → CSV export to `exports/` (gitignored) and tell the owner.
+- Paste-a-playlist seeding via `GET /playlists/{id}/items`; tracks not in our index are skipped with a note.
+
+## M5: Feedback scripts
+
+- `make feedback`: weekly keep rate (kept ÷ shown) and the most-removed tracks/artists, printed to the terminal only.
+
+## Decisions (owner, 2026-11-01)
+
+1. Spotify Premium: **yes**, so dev-mode save is possible (verified in M4).
+2. Dataset: **read straight from the zip** in `data/raw/` (no 33.5 GB unzip).
+3. Neighbours: **build top-200**, and evaluate top-100 too.
+4. Vite + Supabase starter: **deleted** (in git history).

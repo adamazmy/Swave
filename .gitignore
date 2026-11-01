@@ -1,30 +1,51 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# ── Dataset & derived artefacts: NEVER commit (Spotify MPD licence: non-commercial, no redistribution) ──
+data/
+spotify_million_playlist_dataset.zip
+mpd.slice.*.json
+*.parquet
+*.npz
+*.npy
+*.pkl
+*.sql.gz
+*.dump
+dumps/
+exports/
+*.csv
+!eval/results.csv
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Local env & tooling
+# ── Secrets ──
 .env
 .env.*
 !.env.example
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# ── Node / Next.js ──
+node_modules/
+.next/
+out/
+dist/
+dist-ssr/
+*.tsbuildinfo
+next-env.d.ts
+
+# ── Logs ──
+logs/
+*.log
+npm-debug.log*
+
+# ── Editor / OS / local tooling ──
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
 .claude/settings.local.json
