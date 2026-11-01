@@ -12,7 +12,9 @@ K ?= 200
 MIN_CO ?= 2
 ALPHA ?= 0
 
-.PHONY: setup db ingest build-index eval api web dev test
+.PHONY: setup db ingest build-index eval api web dev feedback test
+
+WEEKS ?= 8
 
 setup:              ## venv + deps + pre-commit hooks
 	$(PYTHON) -m venv api/.venv
@@ -41,6 +43,9 @@ web:                ## Next.js dev server on http://localhost:3000
 
 dev: db             ## API + web together (Ctrl-C stops both)
 	npx --prefix web concurrently -k -n api,web -c green,cyan "$(MAKE) api" "npm --prefix web run dev"
+
+feedback: db        ## weekly keep rate + most-removed tracks/artists (terminal only)
+	$(VENV_PY) -m swave.pipeline.feedback --weeks $(WEEKS)
 
 test: db            ## API/pipeline tests + web typecheck, lint, unit tests (synthetic data only)
 	$(VENV_PY) -m pytest -q api/tests

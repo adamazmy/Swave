@@ -80,6 +80,12 @@ Follow-ups (not now): recommender v2 deeper candidate pool so popular vibes can 
 - First task: a real test save in dev mode. If it fails → CSV export to `exports/` (gitignored) and tell the owner.
 - Paste-a-playlist seeding via `GET /playlists/{id}/items`; tracks not in our index are skipped with a note.
 
+## M5 result (2026-11-01): done
+
+- `make feedback [WEEKS=8]`: per ISO week (UTC): sessions, shown, kept, keep rate, removed, sessions that saved; then most-removed tracks and artists. Terminal only, reads `events`.
+- Counting: once per (session, track) for every action (re-ranks re-log `shown`: the owner's first session had 954 shown rows for 367 distinct songs); kept = ✓ or ＋ more-like-this (the owner's 3 saved songs all came from ＋).
+- First real report: 6 sessions, 367 shown, 3 kept (0.8%), 5 removed; most-removed artist Kesha (2×).
+
 ## M5: Feedback scripts
 
 - `make feedback`: weekly keep rate (kept ÷ shown) and the most-removed tracks/artists, printed to the terminal only.

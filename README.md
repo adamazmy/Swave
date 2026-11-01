@@ -20,7 +20,11 @@ offline:  MPD slices ─▶ make ingest ─▶ make build-index ─▶ make eval
 - **Recommender v1: item-item co-occurrence.** A sparse playlist × track matrix gives, for every pair of tracks, how many playlists contain both. That count is normalised by popularity (cosine, or positive PMI), and the top-200 neighbours of each track are stored in a `neighbours` table so requests are fast.
 - **Scoring** a seed set: `Σ over seeds of sim(seed, track) / playlist_count(track)^alpha`. `alpha` is the familiar ↔ adventurous slider: 0 = no penalty for popular songs.
 
-> Status: M4 (pipeline, evaluation, API, frontend, Spotify save). Feedback scripts next; see [PLAN.md](PLAN.md).
+> Status: MVP complete (M1–M5): pipeline, evaluation, API, frontend, Spotify save, feedback report. See [PLAN.md](PLAN.md).
+
+## Feedback loop
+
+Every action in the app (shown, seeded, previewed, kept, removed, more like this, saved) is logged to the local `events` table with time, track, list position and slider value. It never leaves your machine and is never committed. `make feedback` turns it into a weekly report; each song counts once per session, and "more like this" counts as a keep.
 
 ## Using it
 
@@ -67,6 +71,7 @@ Requirements: Docker, Python 3.12, GNU make (Windows: `winget install ezwinports
 | `make eval` | Offline evaluation → one line + a row in `eval/results.csv`. `METHOD K MIN_CO ALPHA` |
 | `make dev` | API + web app together |
 | `make api` / `make web` | Just the API (:8000) / just the web app (:3000) |
+| `make feedback` | Weekly keep rate (kept ÷ shown) and most-removed tracks/artists, printed to the terminal. `WEEKS=8` |
 | `make test` | Pipeline + API tests (throwaway `swave_test` DB), web typecheck, lint and unit tests. Synthetic data only |
 
 ## Evaluation
