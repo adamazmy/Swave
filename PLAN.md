@@ -46,6 +46,13 @@ Loop: seed → recommend → refine → save. Each milestone ends with: tests + 
 - "Remove → replace" = client asks `/recommend` with removed + shown tracks in `exclude`, takes the next one.
 - Tests: endpoint tests against a throwaway test DB seeded from synthetic fixtures.
 
+## M3 result (2026-11-01): done
+
+- Next.js 16.4 (App Router, cacheComponents) + Tailwind 4, dark. Seed screen (debounced search, 1–5 seeds) and Results (40 rows, preview, keep / more-like-this / remove-and-replace, slider re-rank with kept songs pinned on top, URL keeps seeds + slider).
+- Added event `shown` (+ `POST /events/batch`): needed for keep rate = kept ÷ shown. `/recommend` now also returns seed metadata.
+- "More like this" also keeps the song (it's excluded from results once it's a seed, so otherwise it would vanish).
+- Slider maps linearly to alpha 0–1. Offline eval says alpha 0.5 is already very adventurous; tune by feel.
+
 ## M3: Frontend (Next.js + Tailwind, dark)
 
 - Screen 1 **Seed**: search box, pick 1–5 seeds, or paste a Spotify playlist link (only works after M4 and only for own/collaborative playlists).

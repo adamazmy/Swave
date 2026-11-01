@@ -124,6 +124,7 @@ def test_recommend_exclude_gives_next_best(client):
 def test_recommend_unknown_seeds(client):
     body = client.post("/recommend", json={"seeds": [uri(1), uri(99)]}).json()
     assert body["unknown_seeds"] == [uri(99)]
+    assert [s["name"] for s in body["seeds"]] == ["Paper Lanterns"]
     assert client.post("/recommend", json={"seeds": [uri(99)]}).status_code == 404
 
 
@@ -144,6 +145,17 @@ def test_events_logged(client, dsn):
         row = conn.execute("SELECT action, track_uri, position, slider FROM events WHERE id = %s",
                            (r.json()["id"],)).fetchone()
     assert row == ("kept", uri(3), 4, pytest.approx(0.3))
+
+
+def test_events_batch(client, dsn):
+    evs = [{"action": "shown", "track_uri": uri(i), "position": i, "slider": 0.0, "session_id": "b1"}
+           for i in range(3)]
+    r = client.post("/events/batch", json=evs)
+    assert r.status_code == 201 and r.json() == {"logged": 3}
+    with psycopg.connect(dsn) as conn:
+        n = conn.execute("SELECT count(*) FROM events WHERE session_id = 'b1' AND action = 'shown'").fetchone()[0]
+    assert n == 3
+    assert client.post("/events/batch", json=[]).status_code == 422
 
 
 def test_events_validation(client):

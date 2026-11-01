@@ -8,7 +8,7 @@ from typing import Literal
 
 import httpx
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
@@ -18,20 +18,25 @@ from swave.config import database_url
 from swave.recommend import score
 
 TRACK_URI = r"^spotify:track:[A-Za-z0-9]{22}$"
+ACTIONS = ("shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved")
+Action = Literal["shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved"]
 
 # App-owned tables. Unlike tracks/neighbours they survive a re-ingest (keyed by track_uri).
-APP_SCHEMA = """
+# `shown` (one row per track displayed) is the denominator of the keep rate.
+APP_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS events (
     id         bigserial PRIMARY KEY,
     ts         timestamptz NOT NULL DEFAULT now(),
     session_id text,
-    action     text NOT NULL CHECK (action IN
-                 ('seeded', 'previewed', 'kept', 'removed', 'more_like_this', 'saved')),
+    action     text NOT NULL,
     track_uri  text,
     position   int,
     slider     real
 );
 CREATE INDEX IF NOT EXISTS events_ts ON events (ts);
+ALTER TABLE events DROP CONSTRAINT IF EXISTS events_action_check;
+ALTER TABLE events ADD CONSTRAINT events_action_check
+    CHECK (action IN ({", ".join(f"'{a}'" for a in ACTIONS)}));
 CREATE TABLE IF NOT EXISTS previews (
     track_uri  text PRIMARY KEY,
     deezer_id  bigint,
@@ -65,11 +70,12 @@ class RecommendIn(BaseModel):
 
 class RecommendOut(BaseModel):
     results: list[Recommendation]
+    seeds: list[Track]  # known seeds, in request order
     unknown_seeds: list[str]
 
 
 class EventIn(BaseModel):
-    action: Literal["seeded", "previewed", "kept", "removed", "more_like_this", "saved"]
+    action: Action
     track_uri: str | None = Field(None, pattern=TRACK_URI)
     position: int | None = Field(None, ge=0)
     slider: float | None = Field(None, ge=0.0, le=1.0)
@@ -159,8 +165,16 @@ def create_app(dsn: str | None = None) -> FastAPI:
             meta = {r[0]: r[1:] for r in conn.execute(
                 """SELECT track_id, track_uri, name, artist, album, playlist_count
                    FROM tracks WHERE track_id = ANY(%s)""",
-                (res.track.tolist(),),
+                (res.track.tolist() + seed_ids,),
             ).fetchall()}
+        seen: set[str] = set()
+        seeds = []
+        for u in body.seeds:
+            if u in ids and u not in seen:
+                seen.add(u)
+                m = meta[ids[u]]
+                seeds.append(Track(track_uri=m[0], name=m[1], artist=m[2], album=m[3],
+                                   playlist_count=m[4]))
         results = [
             Recommendation(
                 track_uri=meta[t][0], name=meta[t][1], artist=meta[t][2], album=meta[t][3],
@@ -169,17 +183,25 @@ def create_app(dsn: str | None = None) -> FastAPI:
             )
             for t, s, h, c in zip(res.track.tolist(), res.score, res.seed_hits, res.co_count)
         ]
-        return RecommendOut(results=results, unknown_seeds=unknown)
+        return RecommendOut(results=results, seeds=seeds, unknown_seeds=unknown)
+
+    insert_event = """INSERT INTO events (session_id, action, track_uri, position, slider)
+                      VALUES (%s, %s, %s, %s, %s)"""
+
+    def row(ev: EventIn) -> tuple:
+        return (ev.session_id, ev.action, ev.track_uri, ev.position, ev.slider)
 
     @app.post("/events", status_code=201)
     def log_event(ev: EventIn) -> dict:
         with pool.connection() as conn:
-            (event_id,) = conn.execute(
-                """INSERT INTO events (session_id, action, track_uri, position, slider)
-                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-                (ev.session_id, ev.action, ev.track_uri, ev.position, ev.slider),
-            ).fetchone()
+            (event_id,) = conn.execute(insert_event + " RETURNING id", row(ev)).fetchone()
         return {"id": event_id}
+
+    @app.post("/events/batch", status_code=201)
+    def log_events(evs: list[EventIn] = Body(min_length=1, max_length=200)) -> dict:
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.executemany(insert_event, [row(e) for e in evs])
+        return {"logged": len(evs)}
 
     @app.get("/preview", response_model=PreviewOut)
     def preview(track_uri: str = Query(pattern=TRACK_URI)):

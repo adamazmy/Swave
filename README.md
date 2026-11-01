@@ -20,7 +20,14 @@ offline:  MPD slices ─▶ make ingest ─▶ make build-index ─▶ make eval
 - **Recommender v1: item-item co-occurrence.** A sparse playlist × track matrix gives, for every pair of tracks, how many playlists contain both. That count is normalised by popularity (cosine, or positive PMI), and the top-200 neighbours of each track are stored in a `neighbours` table so requests are fast.
 - **Scoring** a seed set: `Σ over seeds of sim(seed, track) / playlist_count(track)^alpha`. `alpha` is the familiar ↔ adventurous slider: 0 = no penalty for popular songs.
 
-> Status: M2 (data pipeline, evaluation, API). Frontend and Spotify save are in progress; see [PLAN.md](PLAN.md).
+> Status: M3 (pipeline, evaluation, API, frontend). Spotify save is in progress; see [PLAN.md](PLAN.md).
+
+## Using it
+
+`make dev` starts the API (:8000) and the web app on <http://localhost:3000>.
+
+1. **Seed**: search and pick 1–5 songs, then *Find songs*.
+2. **Results**: 40 songs with a 30-second preview and a reason each. ✓ keeps a song, ＋ "more like this" adds it as a seed (and keeps it), ✕ removes it and pulls in the next best. The **Familiar ↔ Adventurous** slider sets the popularity penalty (alpha 0 → 1); kept songs stay on top when the list re-ranks.
 
 ## API
 
@@ -30,7 +37,7 @@ offline:  MPD slices ─▶ make ingest ─▶ make build-index ─▶ make eval
 |---|---|
 | `GET /search?q=&limit=20` | Tracks whose title/artist contain every word, most popular first |
 | `POST /recommend` `{seeds[1–10], alpha 0–1, exclude[], n≤100}` | Ranked tracks with `seed_hits`, `co_count` and a one-line `reason`. Remove → replace = call again with shown/removed tracks in `exclude` |
-| `POST /events` `{action, track_uri?, position?, slider?, session_id?}` | Logs seeded / previewed / kept / removed / more_like_this / saved |
+| `POST /events` `{action, track_uri?, position?, slider?, session_id?}` | Logs shown / seeded / previewed / kept / removed / more_like_this / saved (`shown` = denominator of the keep rate). `POST /events/batch` takes a list |
 | `GET /preview?track_uri=` | 30-second Deezer preview URL (or `null`), match cached in Postgres |
 | `GET /health` | How the neighbour index was built |
 
@@ -53,8 +60,9 @@ Requirements: Docker, Python 3.12, GNU make (Windows: `winget install ezwinports
 | `make ingest` | Dataset → `tracks`, `playlist_tracks` (+ held-out eval set). Full dataset: ~20–40 min |
 | `make build-index` | Top-K neighbours for every track → `neighbours`. Full dataset: ~1–3 h. `METHOD=cosine\|pmi K=200 MIN_CO=2` |
 | `make eval` | Offline evaluation → one line + a row in `eval/results.csv`. `METHOD K MIN_CO ALPHA` |
-| `make api` | FastAPI on :8000 with auto-reload |
-| `make test` | Unit + API tests (synthetic data only; API tests use a throwaway `swave_test` database) |
+| `make dev` | API + web app together |
+| `make api` / `make web` | Just the API (:8000) / just the web app (:3000) |
+| `make test` | Pipeline + API tests (throwaway `swave_test` DB), web typecheck, lint and unit tests. Synthetic data only |
 
 ## Evaluation
 

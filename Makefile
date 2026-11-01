@@ -12,13 +12,14 @@ K ?= 200
 MIN_CO ?= 2
 ALPHA ?= 0
 
-.PHONY: setup db ingest build-index eval api test
+.PHONY: setup db ingest build-index eval api web dev test
 
 setup:              ## venv + deps + pre-commit hooks
 	$(PYTHON) -m venv api/.venv
 	$(VENV_PY) -m pip install -q --upgrade pip
 	$(VENV_PY) -m pip install -q -e "api[dev]"
 	$(VENV_PY) -m pre_commit install
+	npm --prefix web install
 
 db:                 ## start Postgres and wait until healthy
 	docker compose up -d --wait db
@@ -35,5 +36,14 @@ eval: db            ## hit-rate@50 / recall@50 on held-out playlists -> eval/res
 api: db             ## FastAPI on http://127.0.0.1:8000 (docs at /docs), auto-reload
 	$(VENV_PY) -m uvicorn swave.main:create_app --factory --reload --reload-dir api/swave --host 127.0.0.1 --port 8000
 
-test: db            ## unit + API tests (synthetic fixtures only; API tests use a throwaway swave_test DB)
+web:                ## Next.js dev server on http://localhost:3000
+	npm --prefix web run dev
+
+dev: db             ## API + web together (Ctrl-C stops both)
+	npx --prefix web concurrently -k -n api,web -c green,cyan "$(MAKE) api" "npm --prefix web run dev"
+
+test: db            ## API/pipeline tests + web typecheck, lint, unit tests (synthetic data only)
 	$(VENV_PY) -m pytest -q api/tests
+	npm --prefix web run typecheck
+	npm --prefix web run lint
+	npm --prefix web test

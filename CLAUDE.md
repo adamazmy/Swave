@@ -20,7 +20,7 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
   - `eval_holdout(pid)`: the 1,000 held-out playlists
   - `neighbours(track_id, neighbour_id, sim, co_count)`: top-200 per track, precomputed (ints keep this ~130M-row table small)
   - `index_meta(method, k, min_co, built_at, git)`: how `neighbours` was built
-  - `events(id, ts, action, track_uri, position, slider, session_id)`: actions: seeded, previewed, kept, removed, more_like_this, saved
+  - `events(id, ts, action, track_uri, position, slider, session_id)`: actions: shown, seeded, previewed, kept, removed, more_like_this, saved (`shown` = keep-rate denominator)
   - `previews(track_uri PK, deezer_id, matched, checked_at)`: Deezer match cache (misses cached too)
   - `spotify_auth(id=1, refresh_token, expires_at)`: single row, owner's token
 - **Recommender v1** = item-item co-occurrence. `sim` is cosine `c_ij / sqrt(n_i·n_j)` or PMI (whichever evaluates better, recorded in `eval/results.csv`).
@@ -41,7 +41,11 @@ api/                 Python package + FastAPI app
     spotify.py       PKCE OAuth + playlist save
     main.py          FastAPI routes: /search /recommend /events /auth/* /save
   tests/             pytest, synthetic fixtures only
-web/                 Next.js app (2 screens: Seed, Results)
+web/                 Next.js 16 app (2 screens: Seed, Results). Read web/AGENTS.md: this Next.js version
+                     differs from older ones, check node_modules/next/dist/docs before using an API
+  app/               routes: / (seed), /results (client, inside <Suspense> for useSearchParams)
+  components/        seed-screen, results-screen, track-row, icons
+  lib/               api.ts (typed client), playlist.ts (pure list logic + vitest), session.ts
 eval/results.csv     metrics history (no track data)
 data/raw/            dataset (gitignored, never committed)
 docker-compose.yml   postgres:16
