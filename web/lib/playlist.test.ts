@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { addSeed, mergeKept, parseSeeds, refreshKept, replaceAt, sliderToAlpha } from "./playlist";
+import {
+  addSeed,
+  mergeKept,
+  parseSeeds,
+  refreshKept,
+  replaceAt,
+  sameSet,
+  sliderToAlpha,
+  slug,
+  toCsv,
+} from "./playlist";
 
 // Synthetic ids only.
 const u = (i: number) => `spotify:track:fake${String(i).padStart(18, "0")}`;
@@ -50,6 +60,28 @@ describe("addSeed", () => {
     expect(addSeed(seeds, u(1))).toBe(seeds);
     expect(addSeed(seeds, u(2))).toEqual([u(1), u(2)]);
     expect(addSeed([u(1), u(2)], u(3), 2)).toEqual([u(1), u(2)]);
+  });
+});
+
+describe("toCsv", () => {
+  it("has a header and escapes commas and quotes", () => {
+    const csv = toCsv([{ name: 'Song, "Live"', artist: "Fake Band", album: "Album", track_uri: u(1) }]);
+    expect(csv.split("\r\n")).toEqual([
+      "Track name,Artist name,Album,Spotify URI",
+      `"Song, ""Live""",Fake Band,Album,${u(1)}`,
+      "",
+    ]);
+  });
+});
+
+describe("sameSet / slug", () => {
+  it("compares ignoring order", () => {
+    expect(sameSet([u(1), u(2)], [u(2), u(1)])).toBe(true);
+    expect(sameSet([u(1)], [u(1), u(2)])).toBe(false);
+  });
+  it("makes safe file names", () => {
+    expect(slug("Swave · Mr. Brightside!")).toBe("swave-mr-brightside");
+    expect(slug("···")).toBe("playlist");
   });
 });
 

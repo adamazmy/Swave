@@ -63,6 +63,25 @@ export function addSeed(seeds: string[], uri: string, max = MAX_SEEDS): string[]
   return [...seeds, uri];
 }
 
+/** Same members regardless of order. */
+export function sameSet(a: string[], b: string[]): boolean {
+  const sa = new Set(a);
+  return sa.size === new Set(b).size && b.every((x) => sa.has(x));
+}
+
+type CsvTrack = { name: string; artist: string; album: string; track_uri: string };
+
+/** CSV for playlist-transfer tools (TuneMyMusic, Soundiiz…): fallback when Spotify save fails. */
+export function toCsv(tracks: CsvTrack[]): string {
+  const cell = (s: string) => (/[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  const rows = tracks.map((t) => [t.name, t.artist, t.album, t.track_uri].map(cell).join(","));
+  return ["Track name,Artist name,Album,Spotify URI", ...rows].join("\r\n") + "\r\n";
+}
+
+export function slug(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "playlist";
+}
+
 export function formatCount(n: number): string {
   return new Intl.NumberFormat("en", { notation: "compact" }).format(n);
 }

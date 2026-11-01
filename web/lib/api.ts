@@ -34,6 +34,8 @@ export type AppEvent = {
   session_id?: string;
 };
 
+export type AuthStatus = { configured: boolean; connected: boolean; display_name: string | null };
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -64,6 +66,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(res.status, detail);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -81,6 +84,25 @@ export const api = {
     request<{ track_uri: string; preview_url: string | null }>(
       `/preview?${new URLSearchParams({ track_uri: trackUri })}`,
     ),
+
+  authStatus: () => request<AuthStatus>("/auth/status"),
+
+  /** Full-page redirect target: API → Spotify login → back to `returnTo`. */
+  loginUrl: (returnTo: string) => `${API_URL}/auth/login?${new URLSearchParams({ return_to: returnTo })}`,
+
+  logout: () => request<void>("/auth/logout", { method: "POST" }).catch(() => undefined),
+
+  save: (body: { name: string; track_uris: string[]; description?: string }) =>
+    request<{ id: string; url: string | null; added: number }>("/save", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  importPlaylist: (url: string) =>
+    request<{ tracks: Track[]; total: number; missing: number }>("/import", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
 
   /** Fire-and-forget: logging must never break the UI. */
   log: (events: AppEvent[]) => {

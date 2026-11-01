@@ -15,7 +15,9 @@ import {
   sliderToAlpha,
 } from "@/lib/playlist";
 import { currentSession } from "@/lib/session";
+import { readResults, writeResults } from "@/lib/stored";
 import { Spinner, XIcon } from "./icons";
+import SavePanel from "./save-panel";
 import TrackRow, { type PreviewState } from "./track-row";
 
 type Status = "loading" | "ready" | "error";
@@ -24,19 +26,30 @@ export default function ResultsScreen() {
   const router = useRouter();
   const params = useSearchParams();
 
-  const [seeds, setSeeds] = useState<string[]>(() => parseSeeds(params.get("seeds")));
+  // State saved for this tab (reload / Spotify login redirect). Browser-only component, so
+  // reading sessionStorage in initialisers is safe (see results-client.tsx).
+  const [restored] = useState(() => readResults(parseSeeds(params.get("seeds"))));
+
+  const [seeds, setSeeds] = useState<string[]>(() => restored?.seeds ?? parseSeeds(params.get("seeds")));
   const [slider, setSlider] = useState(() => {
+    if (restored) return restored.slider;
     const v = Number(params.get("v"));
     return Number.isFinite(v) ? sliderToAlpha(v) : 0;
   });
-  const [seedTracks, setSeedTracks] = useState<Track[]>([]);
-  const [list, setList] = useState<Recommendation[]>([]);
-  const [kept, setKept] = useState<Set<string>>(new Set());
-  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [seedTracks, setSeedTracks] = useState<Track[]>(() => restored?.seedTracks ?? []);
+  const [list, setList] = useState<Recommendation[]>(() => restored?.list ?? []);
+  const [kept, setKept] = useState<Set<string>>(() => new Set(restored?.kept));
+  const [removed, setRemoved] = useState<Set<string>>(() => new Set(restored?.removed));
   const [pending, setPending] = useState<Set<string>>(new Set());
-  const [status, setStatus] = useState<Status>(() => (seeds.length ? "loading" : "ready"));
+  const [status, setStatus] = useState<Status>(() => (restored || !seeds.length ? "ready" : "loading"));
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [name, setName] = useState(() => restored?.name ?? "");
+  // Coming back from the Spotify login redirect.
+  const [notice, setNotice] = useState<string | null>(() => {
+    if (params.get("spotify") === "connected") return "Spotify connected. You can save your playlist now.";
+    const err = params.get("spotify_error");
+    return err ? `Spotify login failed: ${err}` : null;
+  });
 
   const [playing, setPlaying] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState<string | null>(null);
@@ -73,6 +86,7 @@ export default function ResultsScreen() {
         const merged = mergeKept(refreshKept(keptTracks, res.results, nextSeeds), res.results);
         setList(merged);
         setSeedTracks(res.seeds);
+        setName((n) => n || `Swave · ${res.seeds[0]?.name ?? "my vibe"}`);
         setError(null);
         setStatus("ready");
         if (res.unknown_seeds.length) setNotice(`${res.unknown_seeds.length} seed(s) aren't in the dataset and were ignored.`);
@@ -91,25 +105,33 @@ export default function ResultsScreen() {
     [log, router],
   );
 
-  // First load.
+  // First load (skipped when the tab's state was restored).
   useEffect(() => {
     session.current = currentSession();
-    if (seeds.length) void load(seeds, slider);
+    if (!restored && seeds.length) void load(seeds, slider);
+    else if (params.has("spotify") || params.has("spotify_error")) {
+      router.replace(`/results?seeds=${seeds.join(",")}&v=${slider}`, { scroll: false });
+    }
     const el = audio;
     return () => el.current?.pause();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Slider: debounce re-ranks while dragging.
-  const firstSlider = useRef(true);
+  // Save tab state after every change.
   useEffect(() => {
-    if (firstSlider.current) {
-      firstSlider.current = false;
-      return;
-    }
-    const t = setTimeout(() => void load(latest.current.seeds, slider), 350);
-    return () => clearTimeout(t);
-  }, [slider, load]);
+    if (status !== "ready" || list.length === 0) return;
+    writeResults({ seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks, name });
+  }, [status, seeds, slider, list, kept, removed, seedTracks, name]);
+
+  // Slider: re-rank from the change handler (debounced while dragging). Not an effect: effects
+  // also run on mount (twice in dev StrictMode), which caused an unwanted re-rank on open.
+  const sliderTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(sliderTimer.current), []);
+  function onSlider(value: number) {
+    setSlider(value);
+    clearTimeout(sliderTimer.current);
+    sliderTimer.current = setTimeout(() => void load(latest.current.seeds, value), 350);
+  }
 
   function toggleKeep(t: Recommendation, i: number) {
     const next = new Set(kept);
@@ -245,16 +267,7 @@ export default function ResultsScreen() {
           <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-300">← New vibe</Link>
           <h1 className="text-2xl font-semibold tracking-tight">Your vibe</h1>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            disabled
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
-            title="Spotify save arrives in M4"
-          >
-            Save {kept.size > 0 ? kept.size : ""} to Spotify
-          </button>
-          <span className="text-xs text-zinc-500">{kept.size} kept · Spotify save coming in M4</span>
-        </div>
+        <span className="pt-6 text-sm text-zinc-400 tabular-nums">{kept.size} kept</span>
       </header>
 
       <section aria-label="Seeds" className="flex flex-wrap gap-2">
@@ -287,7 +300,7 @@ export default function ResultsScreen() {
           max={1}
           step={0.05}
           value={slider}
-          onChange={(e) => setSlider(Number(e.target.value))}
+          onChange={(e) => onSlider(Number(e.target.value))}
           className="w-full"
           aria-valuetext={`${Math.round(slider * 100)}% adventurous`}
         />
@@ -345,6 +358,21 @@ export default function ResultsScreen() {
             />
           ))}
         </ol>
+      )}
+
+      {status === "ready" && list.length > 0 && (
+        <SavePanel
+          tracks={list.filter((t) => kept.has(t.track_uri))}
+          name={name}
+          onNameChange={setName}
+          onSaved={() =>
+            log(
+              list
+                .map((t, i) => ({ action: "saved" as const, track_uri: t.track_uri, position: i }))
+                .filter((e) => kept.has(e.track_uri)),
+            )
+          }
+        />
       )}
     </div>
   );

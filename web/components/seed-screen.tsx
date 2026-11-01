@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Track } from "@/lib/api";
 import { formatCount, MAX_START_SEEDS } from "@/lib/playlist";
 import { newSession } from "@/lib/session";
+import { clearResults } from "@/lib/stored";
 import { PlusIcon, Spinner, XIcon } from "./icons";
 
 export default function SeedScreen() {
@@ -58,7 +59,39 @@ export default function SeedScreen() {
     setSeeds([...seeds, t]);
   }
 
+  const [link, setLink] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<{ text: string; connect?: boolean } | null>(null);
+
+  async function importLink(e: React.FormEvent) {
+    e.preventDefault();
+    if (!link.trim()) return;
+    setImporting(true);
+    setImportMsg(null);
+    try {
+      const res = await api.importPlaylist(link.trim());
+      if (res.tracks.length === 0) {
+        setImportMsg({ text: `None of the playlist's ${res.total} songs are in the dataset. Pick seeds by search instead.` });
+        return;
+      }
+      const picked = res.tracks.slice(0, MAX_START_SEEDS);
+      setSeeds(picked);
+      setImportMsg({
+        text: `Found ${res.tracks.length} of ${res.total} songs in the dataset. Using the first ${picked.length} as seeds; edit them above.`,
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setImportMsg({ text: "Connect Spotify to read your playlists.", connect: true });
+      } else {
+        setImportMsg({ text: err instanceof ApiError ? err.message : "Couldn't read that playlist" });
+      }
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function start() {
+    clearResults();
     const session = newSession();
     api.log(seeds.map((s, i) => ({ action: "seeded", track_uri: s.track_uri, position: i, session_id: session })));
     router.push(`/results?seeds=${seeds.map((s) => s.track_uri).join(",")}`);
@@ -142,6 +175,36 @@ export default function SeedScreen() {
 
         {!searching && !error && query.trim().length >= 2 && results.length === 0 && (
           <p className="text-sm text-zinc-500">No songs found. Only tracks in the playlist dataset are searchable.</p>
+        )}
+      </section>
+
+      <section className="space-y-2 border-t border-zinc-800/60 pt-6">
+        <form onSubmit={(e) => void importLink(e)} className="flex flex-wrap gap-2">
+          <label htmlFor="playlist-link" className="sr-only">Spotify playlist link</label>
+          <input
+            id="playlist-link"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="…or paste one of your Spotify playlist links"
+            className="min-w-0 flex-1 basis-64 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm outline-none placeholder:text-zinc-500 focus:border-emerald-500/60"
+          />
+          <button
+            type="submit"
+            disabled={importing || !link.trim()}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-40"
+          >
+            {importing ? <Spinner className="inline h-4 w-4" /> : "Use playlist"}
+          </button>
+        </form>
+        {importMsg && (
+          <p className="text-sm text-zinc-400" aria-live="polite">
+            {importMsg.text}{" "}
+            {importMsg.connect && (
+              <a href={api.loginUrl(typeof window === "undefined" ? "" : window.location.href)} className="text-emerald-400 underline">
+                Connect Spotify
+              </a>
+            )}
+          </p>
         )}
       </section>
     </div>

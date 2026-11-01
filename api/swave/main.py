@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import os
+import secrets
+import time
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Annotated, Literal
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 import numpy as np
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from psycopg_pool import ConnectionPool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
-from swave import deezer
+from swave import deezer, spotify
 from swave.config import database_url
 from swave.recommend import score
 
@@ -87,6 +91,37 @@ class PreviewOut(BaseModel):
     preview_url: str | None
 
 
+TrackUri = Annotated[str, StringConstraints(pattern=TRACK_URI)]
+
+
+class SaveIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field("Built with Swave", max_length=300)
+    track_uris: list[TrackUri] = Field(min_length=1, max_length=500)
+
+
+class SaveOut(BaseModel):
+    id: str
+    url: str | None
+    added: int
+
+
+class ImportIn(BaseModel):
+    url: str = Field(min_length=10, max_length=300)
+
+
+class ImportOut(BaseModel):
+    tracks: list[Track]  # tracks of the playlist that are in our index, playlist order
+    total: int  # tracks in the Spotify playlist
+    missing: int  # not in the dataset index
+
+
+class AuthStatus(BaseModel):
+    configured: bool
+    connected: bool
+    display_name: str | None
+
+
 def reason(hits: int, n_seeds: int, co: int) -> str:
     seeds = "your seed" if n_seeds == 1 else f"{hits} of your {n_seeds} seeds"
     return f"appears with {seeds} in {co:,} shared playlists"
@@ -96,27 +131,52 @@ def escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def create_app(dsn: str | None = None) -> FastAPI:
+def with_param(url: str, **params: str) -> str:
+    return url + ("&" if "?" in url else "?") + urlencode(params)
+
+
+def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> FastAPI:
     pool = ConnectionPool(dsn or database_url(), min_size=1, max_size=8, open=False)
-    http = httpx.Client(timeout=5.0)
+    http = http or httpx.Client(timeout=10.0)
+    origins = [o.strip() for o in os.environ.get(
+        "WEB_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+    # OAuth state -> (code_verifier, return_to, created). In memory: single user, 10 min TTL.
+    pending: dict[str, tuple[str, str, float]] = {}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         pool.open(wait=True)
         with pool.connection() as conn:
             conn.execute(APP_SCHEMA)
+            conn.execute(spotify.SCHEMA)
         yield
         pool.close()
         http.close()
 
     app = FastAPI(title="Swave", lifespan=lifespan)
-    origins = os.environ.get("WEB_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[o.strip() for o in origins.split(",") if o.strip()],
+        allow_origins=origins,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )
+
+    def safe_return(url: str | None) -> str:
+        """Only redirect back to the web app's own origins (no open redirect)."""
+        if url:
+            parts = urlsplit(url)
+            if f"{parts.scheme}://{parts.netloc}" in origins:
+                return url
+        return origins[0] + "/"
+
+    def http_error(e: Exception) -> HTTPException:
+        """Map Spotify failures to clean HTTP errors."""
+        if isinstance(e, spotify.NotConnected):
+            return HTTPException(401, "Connect Spotify first")
+        assert isinstance(e, spotify.SpotifyError)
+        hint = (" (dev-mode apps only work for the owner and allow-listed users; "
+                "check the app's User Management)") if e.status == 403 else ""
+        return HTTPException(503 if e.status == 503 else 502, f"Spotify: {e.message}{hint}")
 
     @app.get("/health")
     def health() -> dict:
@@ -213,5 +273,82 @@ def create_app(dsn: str | None = None) -> FastAPI:
             except deezer.DeezerError:
                 url = None  # transient: show no preview, try again next time
         return PreviewOut(track_uri=track_uri, preview_url=url)
+
+    # ── Spotify ──────────────────────────────────────────────────────────────────────────────
+
+    @app.get("/auth/login")
+    def auth_login(return_to: str | None = None):
+        now = time.time()
+        for s in [s for s, (_, _, t) in pending.items() if now - t > 600]:
+            del pending[s]
+        verifier, challenge = spotify.pkce_pair()
+        state = secrets.token_urlsafe(24)
+        try:
+            url = spotify.authorize_url(state, challenge)
+        except spotify.SpotifyError as e:
+            raise HTTPException(503, e.message) from None
+        pending[state] = (verifier, safe_return(return_to), now)
+        return RedirectResponse(url, status_code=302)
+
+    @app.get("/auth/callback")
+    def auth_callback(state: str = "", code: str | None = None, error: str | None = None):
+        entry = pending.pop(state, None)
+        if entry is None:
+            return RedirectResponse(with_param(safe_return(None), spotify_error="Login expired, try again"), 302)
+        verifier, back, _ = entry
+        if error or not code:
+            return RedirectResponse(with_param(back, spotify_error=error or "Login cancelled"), 302)
+        try:
+            with pool.connection() as conn:
+                spotify.connect(conn, http, code, verifier)
+        except (spotify.SpotifyError, spotify.NotConnected) as e:
+            msg = e.message if isinstance(e, spotify.SpotifyError) else "Login failed"
+            return RedirectResponse(with_param(back, spotify_error=msg), 302)
+        return RedirectResponse(with_param(back, spotify="connected"), 302)
+
+    @app.get("/auth/status", response_model=AuthStatus)
+    def auth_status():
+        with pool.connection() as conn:
+            name = spotify.status(conn)
+        return AuthStatus(configured=bool(os.environ.get("SPOTIFY_CLIENT_ID", "").strip()),
+                          connected=name is not None, display_name=name)
+
+    @app.post("/auth/logout", status_code=204)
+    def auth_logout():
+        with pool.connection() as conn:
+            spotify.disconnect(conn)
+
+    @app.post("/save", response_model=SaveOut, status_code=201)
+    def save(body: SaveIn):
+        uris = list(dict.fromkeys(body.track_uris))  # dedupe, keep order
+        with pool.connection() as conn:
+            try:
+                return SaveOut(**spotify.create_playlist(conn, http, body.name, body.description, uris))
+            except (spotify.SpotifyError, spotify.NotConnected) as e:
+                raise http_error(e) from None
+
+    @app.post("/import", response_model=ImportOut)
+    def import_playlist(body: ImportIn):
+        pid = spotify.parse_playlist_id(body.url)
+        if not pid:
+            raise HTTPException(422, "That doesn't look like a Spotify playlist link")
+        with pool.connection() as conn:
+            try:
+                uris = spotify.playlist_track_uris(conn, http, pid)
+            except spotify.SpotifyError as e:
+                if e.status in (403, 404):  # dev mode: only playlists you own or collaborate on
+                    raise HTTPException(403, "Spotify only lets Swave read playlists you own or "
+                                             "collaborate on") from None
+                raise http_error(e) from None
+            except spotify.NotConnected as e:
+                raise http_error(e) from None
+            uris = list(dict.fromkeys(uris))
+            rows = conn.execute(
+                """SELECT track_uri, name, artist, album, playlist_count FROM tracks
+                   WHERE track_uri = ANY(%s)""", (uris,)).fetchall()
+        known = {r[0]: r for r in rows}
+        tracks = [Track(track_uri=r[0], name=r[1], artist=r[2], album=r[3], playlist_count=r[4])
+                  for u in uris if (r := known.get(u))]
+        return ImportOut(tracks=tracks, total=len(uris), missing=len(uris) - len(tracks))
 
     return app
