@@ -31,17 +31,7 @@ export default function TrackRow(p: Props) {
         {p.position + 1}
       </span>
 
-      <button
-        onClick={p.onPreview}
-        disabled={p.preview === "unavailable" || p.pending}
-        className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${
-          p.preview === "playing" ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
-        } disabled:bg-zinc-900 disabled:text-zinc-600`}
-        aria-label={p.preview === "playing" ? `Pause ${t.name}` : `Play preview of ${t.name}`}
-        title={p.preview === "unavailable" ? "No preview available" : "30-second preview"}
-      >
-        {p.preview === "loading" ? <Spinner /> : p.preview === "playing" ? <PauseIcon /> : <PlayIcon />}
-      </button>
+      <PreviewButton name={t.name} state={p.preview} disabled={p.pending} onClick={p.onPreview} />
 
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{t.name}</p>
@@ -80,5 +70,33 @@ export default function TrackRow(p: Props) {
         </button>
       </div>
     </li>
+  );
+}
+
+/** Round play/pause button for a track's 30-second preview. */
+export function PreviewButton({
+  name,
+  state,
+  disabled = false,
+  onClick,
+}: {
+  name: string;
+  state: PreviewState;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={state === "unavailable" || disabled}
+      className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${
+        state === "playing" ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+      } disabled:bg-zinc-900 disabled:text-zinc-600`}
+      aria-label={state === "playing" ? `Pause ${name}` : `Play preview of ${name}`}
+      title={state === "unavailable" ? "No preview available" : "30-second preview"}
+    >
+      {state === "loading" ? <Spinner /> : state === "playing" ? <PauseIcon /> : <PlayIcon />}
+    </button>
   );
 }

@@ -16,7 +16,9 @@ import {
   writeDraft,
   type ImportInfo,
 } from "@/lib/stored";
+import { usePreview } from "@/lib/use-preview";
 import { PlusIcon, Spinner, XIcon } from "./icons";
+import { PreviewButton } from "./track-row";
 
 export default function SeedScreen() {
   const router = useRouter();
@@ -25,6 +27,7 @@ export default function SeedScreen() {
   const [latest, setLatest] = useState(() => readLatestResults());
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
+  const preview = usePreview();
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [seeds, setSeeds] = useState<Track[]>(() => draft?.seeds ?? []);
@@ -219,7 +222,7 @@ export default function SeedScreen() {
 
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
 
-        {!full && results.length > 0 && <PickList tracks={results} onPick={add} isSeed={isSeed} />}
+        {!full && results.length > 0 && <PickList tracks={results} onPick={add} isSeed={isSeed} preview={preview} />}
 
         {!searching && !error && query.trim().length >= 2 && results.length === 0 && (
           <p className="text-sm text-zinc-500">No songs found. Only tracks in the playlist dataset are searchable.</p>
@@ -283,7 +286,8 @@ export default function SeedScreen() {
               </button>
             </div>
             {sourceTracks.length > 0 && (
-              <PickList tracks={sourceTracks} onPick={add} isSeed={isSeed} disabled={full} scroll />
+              <PickList tracks={sourceTracks} onPick={add} isSeed={isSeed} disabled={full} scroll
+                preview={preview} />
             )}
             {importInfo.unmatched.length > 0 && (
               <details className="text-sm text-zinc-500">
@@ -307,29 +311,34 @@ export default function SeedScreen() {
   );
 }
 
-/** Clickable song rows: pick one as a seed. Used for search results and pasted playlists. */
+/** Song rows: preview one, or click it to pick it as a seed. Used for search results and pasted
+ *  playlists. */
 function PickList({
   tracks,
   onPick,
   isSeed,
+  preview,
   disabled = false,
   scroll = false,
 }: {
   tracks: Track[];
   onPick: (t: Track) => void;
   isSeed: (t: Track) => boolean;
+  preview: ReturnType<typeof usePreview>;
   disabled?: boolean;
   scroll?: boolean;
 }) {
   return (
     <ul className={`divide-y divide-zinc-800/60 rounded-lg border border-zinc-800 ${scroll ? "max-h-80 overflow-y-auto" : ""}`}>
       {tracks.map((t) => (
-        <li key={t.track_uri}>
+        <li key={t.track_uri} className="flex items-center gap-1 pl-3">
+          <PreviewButton name={t.name} state={preview.state(t.track_uri)}
+                         onClick={() => void preview.toggle(t.track_uri)} />
           <button
             onClick={() => onPick(t)}
             disabled={disabled || isSeed(t)}
             aria-pressed={isSeed(t)}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-white/5 disabled:opacity-40"
+            className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left hover:bg-white/5 disabled:opacity-40"
           >
             <div className="min-w-0 flex-1">
               <p className="truncate">{t.name}</p>

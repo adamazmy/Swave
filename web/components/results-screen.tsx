@@ -17,9 +17,10 @@ import {
 import { currentSession } from "@/lib/session";
 import { readSource } from "@/lib/source";
 import { clearAll, readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
+import { usePreview } from "@/lib/use-preview";
 import { Spinner, XIcon } from "./icons";
 import SavePanel from "./save-panel";
-import TrackRow, { type PreviewState } from "./track-row";
+import TrackRow from "./track-row";
 
 type Status = "loading" | "ready" | "error";
 
@@ -69,11 +70,6 @@ export default function ResultsScreen() {
     return err ? `Spotify login failed: ${err}` : null;
   });
 
-  const [playing, setPlaying] = useState<string | null>(null);
-  const [loadingPreview, setLoadingPreview] = useState<string | null>(null);
-  const [previews, setPreviews] = useState<Map<string, string | null>>(new Map());
-  const audio = useRef<HTMLAudioElement | null>(null);
-
   const session = useRef<string>("");
   const requestId = useRef(0);
   // Latest values for async callbacks without re-creating them (updated after each render).
@@ -85,6 +81,10 @@ export default function ResultsScreen() {
   const log = useCallback((events: Omit<AppEvent, "session_id" | "slider">[]) => {
     api.log(events.map((e) => ({ ...e, session_id: session.current, slider: latest.current.slider })));
   }, []);
+  const preview = usePreview((uri) =>
+    log([{ action: "previewed", track_uri: uri,
+           position: latest.current.list.findIndex((x) => x.track_uri === uri) }]),
+  );
 
   /** Re-rank: kept tracks stay on top, fresh recommendations fill the rest. */
   const load = useCallback(
@@ -133,8 +133,6 @@ export default function ResultsScreen() {
     else if (params.has("spotify") || params.has("spotify_error")) {
       router.replace(resultsUrl(seeds, slider), { scroll: false });
     }
-    const el = audio;
-    return () => el.current?.pause();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -154,7 +152,7 @@ export default function ResultsScreen() {
   }
 
   function startOver() {
-    audio.current?.pause();
+    preview.stop();
     clearAll();
     // `fresh` remounts the (kept-alive) Seed screen so it starts empty; see seed-client.tsx.
     router.push(`/?fresh=${Date.now().toString(36)}`);
@@ -188,7 +186,7 @@ export default function ResultsScreen() {
     nextKept.delete(t.track_uri);
     setKept(nextKept);
     setPending((p) => new Set(p).add(t.track_uri));
-    if (playing === t.track_uri) stopAudio();
+    if (preview.playing === t.track_uri) preview.stop();
     let replacement: Recommendation | undefined;
     try {
       const res = await api.recommend({
@@ -236,57 +234,6 @@ export default function ResultsScreen() {
     const next = seeds.filter((s) => s !== uri);
     setSeeds(next);
     void load(next, slider);
-  }
-
-  function stopAudio() {
-    audio.current?.pause();
-    setPlaying(null);
-  }
-
-  async function togglePreview(t: Recommendation, i: number) {
-    if (playing === t.track_uri) return stopAudio();
-    let url = previews.get(t.track_uri);
-    if (url === undefined) {
-      setLoadingPreview(t.track_uri);
-      try {
-        url = (await api.preview(t.track_uri)).preview_url;
-      } catch {
-        url = null;
-      } finally {
-        setLoadingPreview(null);
-      }
-      setPreviews((m) => new Map(m).set(t.track_uri, url ?? null));
-    }
-    if (!url) return;
-    if (!audio.current) {
-      audio.current = new Audio();
-      audio.current.onended = () => setPlaying(null);
-    }
-    const el = audio.current;
-    el.onerror = () => {
-      // Signed URL expired: forget it so the next click fetches a fresh one.
-      setPreviews((m) => {
-        const n = new Map(m);
-        n.delete(t.track_uri);
-        return n;
-      });
-      setPlaying(null);
-    };
-    el.src = url;
-    try {
-      await el.play();
-      setPlaying(t.track_uri);
-      log([{ action: "previewed", track_uri: t.track_uri, position: i }]);
-    } catch {
-      setPlaying(null);
-    }
-  }
-
-  function previewState(uri: string): PreviewState {
-    if (loadingPreview === uri) return "loading";
-    if (playing === uri) return "playing";
-    if (previews.get(uri) === null) return "unavailable";
-    return "idle";
   }
 
   if (seeds.length === 0) {
@@ -409,9 +356,9 @@ export default function ResultsScreen() {
               position={i}
               kept={kept.has(t.track_uri)}
               pending={pending.has(t.track_uri)}
-              preview={previewState(t.track_uri)}
+              preview={preview.state(t.track_uri)}
               canAddSeed={seeds.length < MAX_SEEDS}
-              onPreview={() => void togglePreview(t, i)}
+              onPreview={() => void preview.toggle(t.track_uri)}
               onKeep={() => toggleKeep(t, i)}
               onMore={() => moreLikeThis(t, i)}
               onRemove={() => void remove(t, i)}
