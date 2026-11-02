@@ -1,8 +1,23 @@
 @import "tailwindcss";
 
+/* v3 "night" theme: deep wine background, salmon-pink and cream accents, wide display type,
+   LED-style mono labels. Colours are Tailwind tokens (bg-ink, text-pink, border-line, …). */
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-archivo);
+  --font-mono: var(--font-space-mono);
+
+  --color-ink: #1a0911;
+  --color-panel: #230d17;
+  --color-raised: #2e1120;
+  --color-line: #47192e;
+  --color-wine: #5b1832;
+  --color-plum: #8c2146;
+  --color-pink: #ff8a9b;
+  --color-pink-soft: #ffb3be;
+  --color-cream: #f2cf9d;
+  --color-text: #f7e8ec;
+  --color-muted: #c597a6;
+  --color-dim: #8b5c6d;
 }
 
 :root {
@@ -10,11 +25,158 @@
 }
 
 body {
-  background: #0a0a0b;
-  color: #e7e7ea;
+  background: var(--color-ink);
+  color: var(--color-text);
 }
 
-/* Range input: Tailwind has no built-in thumb styling */
-input[type="range"] {
-  accent-color: #34d399;
+/* In a layer so Tailwind utilities (tracking-*, font-*) can override them. */
+@layer components {
+  /* Wide, heavy uppercase headings. Archivo is a variable font with a width axis. */
+  .font-display {
+    font-family: var(--font-archivo);
+    font-stretch: 125%;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  /* Small uppercase, spaced-out mono labels. */
+  .label {
+    font-family: var(--font-space-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  /* Pressable uppercase labels on buttons. */
+  .btn-label {
+    font-family: var(--font-archivo);
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+}
+
+/* Thin double rule along the very top of the page. */
+.top-rule {
+  height: 6px;
+  background: repeating-linear-gradient(to bottom, #6e5a63 0 1px, transparent 1px 3px);
+  opacity: 0.6;
+}
+
+/* ── Ticker (LED marquee) ── */
+.ticker-track {
+  display: flex;
+  width: max-content;
+  animation: ticker 28s linear infinite;
+}
+.ticker-glow {
+  text-shadow: 0 0 6px rgb(255 138 155 / 0.55);
+}
+@keyframes ticker {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* ── Hero mosaic: a tilted dance floor of tiles that slowly light up ── */
+.mosaic {
+  transform: perspective(700px) rotateX(52deg) rotateZ(-4deg);
+  transform-origin: 50% 80%;
+}
+.mosaic > span {
+  animation: tile 6s ease-in-out infinite;
+}
+@keyframes tile {
+  0%,
+  70%,
+  100% {
+    filter: brightness(1);
+  }
+  80% {
+    filter: brightness(1.7);
+  }
+}
+
+/* ── Equalizer bars (preview playing) ── */
+.eq > span {
+  transform-origin: bottom;
+  animation: eq 0.8s ease-in-out infinite alternate;
+}
+.eq > span:nth-child(2) {
+  animation-delay: -0.3s;
+}
+.eq > span:nth-child(3) {
+  animation-delay: -0.55s;
+}
+@keyframes eq {
+  from {
+    transform: scaleY(0.3);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* ── On-air dot ── */
+.on-air {
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track,
+  .mosaic > span,
+  .eq > span,
+  .on-air {
+    animation: none;
+  }
+}
+
+/* ── Range slider: cream fill up to the thumb (--fill set inline) ── */
+input[type="range"].slider {
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-cream) 0 var(--fill, 0%),
+    var(--color-line) var(--fill, 0%) 100%
+  );
+  cursor: pointer;
+}
+input[type="range"].slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--color-cream);
+  border: 2px solid var(--color-ink);
+  box-shadow: 0 0 0 1px var(--color-cream);
+}
+input[type="range"].slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--color-cream);
+  border: 2px solid var(--color-ink);
+}
+input[type="range"].slider:focus-visible {
+  outline: 2px solid var(--color-pink);
+  outline-offset: 6px;
+}
+
+input[type="checkbox"] {
+  accent-color: var(--color-pink);
+}
+
+/* Scrollbars inside lists */
+* {
+  scrollbar-color: var(--color-wine) transparent;
 }

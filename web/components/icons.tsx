@@ -39,3 +39,22 @@ export const Spinner = ({ className = base }: P) => (
     <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth={3} strokeLinecap="round" />
   </svg>
 );
+
+/** Swave logo: four rising bars. */
+export const LogoIcon = ({ className = base }: P) => (
+  <svg viewBox="0 0 20 20" fill="currentColor" className={className} aria-hidden="true">
+    <rect x="2" y="11" width="3" height="7" rx="0.5" />
+    <rect x="6.5" y="7" width="3" height="11" rx="0.5" opacity="0.85" />
+    <rect x="11" y="3" width="3" height="15" rx="0.5" opacity="0.7" />
+    <rect x="15.5" y="9" width="3" height="9" rx="0.5" opacity="0.55" />
+  </svg>
+);
+
+/** Three level bars; they bounce while `playing` (CSS `.eq`, off for reduced motion). */
+export const Bars = ({ playing = false, className = base }: P & { playing?: boolean }) => (
+  <span className={`${playing ? "eq" : ""} flex items-end gap-[2px] ${className}`} aria-hidden="true">
+    <span className="h-[55%] w-[3px] rounded-[1px] bg-current" />
+    <span className="h-full w-[3px] rounded-[1px] bg-current" />
+    <span className="h-[75%] w-[3px] rounded-[1px] bg-current" />
+  </span>
+);

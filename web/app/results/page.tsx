@@ -5,7 +5,7 @@ import ResultsScreen from "@/components/results-client";
 // so it renders in the browser only (inside Suspense).
 export default function ResultsPage() {
   return (
-    <Suspense fallback={<p className="py-12 text-zinc-500">Loading…</p>}>
+    <Suspense fallback={<p className="py-12 label text-dim">Loading…</p>}>
       <ResultsScreen />
     </Suspense>
   );

@@ -85,3 +85,22 @@ export function slug(s: string): string {
 export function formatCount(n: number): string {
   return new Intl.NumberFormat("en", { notation: "compact" }).format(n);
 }
+
+/** True when the Seed box holds a Spotify playlist link (or URI) rather than a search. */
+export function isPlaylistLink(s: string): boolean {
+  return /open\.spotify\.com\/(?:[\w-]+\/)*playlist\/|^\s*spotify:playlist:/i.test(s);
+}
+
+/**
+ * Compact reason line for a row: "appears with your seed in 6,507 shared playlists · appears with
+ * your seed in 1,560 listening sessions" → "with your seed in 6,507 shared playlists · 1,560
+ * listening sessions" (a later part drops its "with … in" when it repeats the first one's).
+ */
+export function shortReason(reason: string): string {
+  const parts = reason.split(" · ").map((p) => p.replace(/^appears /, ""));
+  const lead = (p: string) => p.match(/^with .+? in /)?.[0];
+  const first = lead(parts[0] ?? "");
+  return parts
+    .map((p, i) => (i > 0 && first && lead(p) === first ? p.slice(first.length) : p))
+    .join(" · ");
+}

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Track } from "@/lib/api";
-import { formatCount, MAX_START_SEEDS, sameSet } from "@/lib/playlist";
+import { formatCount, isPlaylistLink, MAX_START_SEEDS, sameSet } from "@/lib/playlist";
 import { newSession } from "@/lib/session";
 import { writeSource, type SourcePlaylist } from "@/lib/source";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@/lib/stored";
 import { usePreview } from "@/lib/use-preview";
 import { PlusIcon, Spinner, XIcon } from "./icons";
+import { Mosaic, Ticker } from "./night";
 import { PreviewButton } from "./track-row";
 
 export default function SeedScreen() {
@@ -102,13 +103,29 @@ export default function SeedScreen() {
     setLatest(null);
   }
 
-  async function importLink(e: React.FormEvent) {
-    e.preventDefault();
-    if (!link.trim()) return;
+  // One box for both: a search, or a pasted playlist link (loaded on Enter).
+  function onInput(value: string) {
+    setImportMsg(null);
+    if (isPlaylistLink(value)) {
+      clearTimeout(timer.current);
+      inflight.current?.abort();
+      setQuery(value);
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    onQuery(value);
+  }
+
+  async function importLink() {
+    const url = query.trim();
+    if (!isPlaylistLink(url)) return;
     setImporting(true);
     setImportMsg(null);
     try {
-      const res = await api.importPlaylist(link.trim());
+      const res = await api.importPlaylist(url);
+      setLink(url);
+      setQuery("");
       setSource(res.playlist);
       setSourceTracks(res.tracks);
       setImportInfo({ total: res.total, missing: res.missing, loose: res.loose, unmatched: res.unmatched });
@@ -140,173 +157,190 @@ export default function SeedScreen() {
     router.push(`/results?seeds=${seeds.map((s) => s.track_uri).join(",")}&run=${run}`);
   }
 
+  const linkMode = isPlaylistLink(query);
+
   return (
     <div className="space-y-8">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">Swave</h1>
-          <p className="text-zinc-400">Pick 1–{MAX_START_SEEDS} songs that capture the vibe.</p>
+      <section className="grid items-center gap-6 sm:grid-cols-[1.15fr_1fr]">
+        <div className="space-y-5">
+          <h1 className="font-display text-5xl leading-[0.95] sm:text-6xl">
+            Make the
+            <br />
+            <span className="text-pink">night.</span>
+          </h1>
+          <p className="max-w-xs text-sm leading-relaxed text-muted">
+            Feed it a few tracks. Swave finds what people play next to them and cuts you a set.
+          </p>
         </div>
-        {(seeds.length > 0 || source || latest) && (
-          <button
-            onClick={startOver}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-white/5"
-            title="Forget the picked seeds, the pasted playlist and your last vibe"
-          >
-            Start over
-          </button>
-        )}
-      </header>
+        <Mosaic className="mx-auto hidden w-full max-w-xs sm:grid" />
+      </section>
+
+      <Ticker
+        items={seeds.map((s) => s.name)}
+        empty="Now loaded ▸ nothing yet ▸ add up to five tracks"
+      />
 
       {latest && (
-        <section aria-label="Your last vibe" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3">
+        <section aria-label="Your last set" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-panel px-4 py-3">
           <div className="min-w-0">
-            <p className="text-sm text-zinc-400">Your last vibe</p>
-            <p className="truncate">
+            <p className="label text-dim">Your last set</p>
+            <p className="truncate text-sm">
               {latest.seedTracks.map((s) => s.name).join(", ") || `${latest.seeds.length} seeds`}
-              <span className="text-zinc-500"> · {latest.kept.length} kept</span>
+              <span className="text-muted"> · {latest.kept.length} kept</span>
             </p>
           </div>
           <Link
             href={resultsUrl(latest)}
-            className="rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium hover:bg-zinc-700"
+            className="btn-label rounded-md border border-cream/50 px-4 py-2.5 text-cream hover:bg-cream/10"
           >
             Continue →
           </Link>
         </section>
       )}
 
-      {seeds.length > 0 && (
-        <section aria-label="Your seeds" className="space-y-4">
+      <section aria-label="Your seeds" className="space-y-4">
+        {seeds.length > 0 && (
           <ul className="flex flex-wrap gap-2">
-            {seeds.map((s) => (
-              <li key={s.track_uri} className="flex items-center gap-2 rounded-full bg-emerald-500/15 py-1 pl-3 pr-1 text-sm text-emerald-200">
-                <span className="max-w-56 truncate">
-                  {s.name} <span className="text-emerald-300/60">· {s.artist}</span>
-                </span>
+            {seeds.map((s, i) => (
+              <li key={s.track_uri} className="flex items-center gap-2 rounded-md border border-line bg-panel py-1.5 pl-2.5 pr-1 text-xs">
+                <span className="font-mono text-pink">{String(i + 1).padStart(2, "0")}</span>
+                <span className="max-w-48 truncate font-semibold" title={`${s.name} · ${s.artist}`}>{s.name}</span>
                 <button
                   onClick={() => setSeeds(seeds.filter((x) => x.track_uri !== s.track_uri))}
-                  className="rounded-full p-1 hover:bg-emerald-500/20"
+                  className="rounded p-1 text-muted hover:bg-white/5 hover:text-text"
                   aria-label={`Remove ${s.name}`}
                 >
-                  <XIcon className="h-3.5 w-3.5" />
+                  <XIcon className="h-3 w-3" />
                 </button>
               </li>
             ))}
           </ul>
-          <button
-            onClick={start}
-            className="rounded-lg bg-emerald-500 px-5 py-2.5 font-medium text-zinc-950 hover:bg-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
-          >
-            Find songs →
-          </button>
-        </section>
-      )}
-
-      <section className="space-y-3">
-        <label htmlFor="search" className="sr-only">Search songs</label>
-        <div className="relative">
-          <input
-            id="search"
-            type="search"
-            autoFocus
-            autoComplete="off"
-            value={query}
-            onChange={(e) => onQuery(e.target.value)}
-            placeholder={full ? "That's 5 seeds. Find songs, or remove one" : "Search a song or artist…"}
-            disabled={full}
-            className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-base outline-none placeholder:text-zinc-500 focus:border-emerald-500/60 disabled:opacity-50"
-          />
-          {searching && <Spinner className="absolute right-3 top-3.5 h-5 w-5 text-zinc-500" />}
-        </div>
-
-        {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-
-        {!full && results.length > 0 && <PickList tracks={results} onPick={add} isSeed={isSeed} preview={preview} />}
-
-        {!searching && !error && query.trim().length >= 2 && results.length === 0 && (
-          <p className="text-sm text-zinc-500">No songs found. Only tracks in the playlist dataset are searchable.</p>
         )}
-      </section>
 
-      <section className="space-y-2 border-t border-zinc-800/60 pt-6">
-        <form onSubmit={(e) => void importLink(e)} className="flex flex-wrap gap-2">
-          <label htmlFor="playlist-link" className="sr-only">Spotify playlist link</label>
-          <input
-            id="playlist-link"
-            value={link}
-            onChange={(e) => setLink(e.target.value)}
-            placeholder="…or paste one of your Spotify playlist links"
-            className="min-w-0 flex-1 basis-64 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm outline-none placeholder:text-zinc-500 focus:border-emerald-500/60"
-          />
-          <button
-            type="submit"
-            disabled={importing || !link.trim()}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-40"
-          >
-            {importing ? <Spinner className="inline h-4 w-4" /> : "Use playlist"}
-          </button>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (linkMode) void importLink();
+          }}
+          className="flex flex-col gap-3 sm:flex-row"
+        >
+          <div className="relative min-w-0 flex-1">
+            <label htmlFor="search" className="sr-only">Add a track, or paste a playlist link</label>
+            <input
+              id="search"
+              type="search"
+              autoFocus
+              autoComplete="off"
+              value={query}
+              onChange={(e) => onInput(e.target.value)}
+              placeholder={full ? "That's five. Build the set, or remove one" : "Add a track, or paste a playlist link"}
+              className="w-full rounded-md border border-line bg-panel px-4 py-4 text-sm outline-none placeholder:text-dim focus:border-pink/60"
+            />
+            {(searching || importing) && <Spinner className="absolute right-4 top-4.5 h-4 w-4 text-muted" />}
+          </div>
+          {linkMode ? (
+            <button
+              type="submit"
+              disabled={importing}
+              className="btn-label rounded-md border border-cream/60 px-6 py-4 text-cream hover:bg-cream/10 disabled:opacity-40"
+            >
+              Load playlist
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={start}
+              disabled={seeds.length === 0}
+              className="btn-label rounded-md bg-cream px-6 py-4 text-ink hover:bg-cream/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Build the set
+            </button>
+          )}
         </form>
+
+        {error && <p role="alert" className="text-sm text-pink">{error}</p>}
         {importMsg && (
-          <p className="text-sm text-zinc-400" aria-live="polite">
+          <p className="text-sm text-muted" aria-live="polite">
             {importMsg.text}{" "}
             {importMsg.connect && (
-              <a href={api.loginUrl(typeof window === "undefined" ? "" : window.location.href)} className="text-emerald-400 underline">
+              <a href={api.loginUrl(typeof window === "undefined" ? "" : window.location.href)} className="text-pink underline">
                 Connect Spotify
               </a>
             )}
           </p>
         )}
-        {source && importInfo && (
-          <div className="space-y-2">
-            <div className="flex items-start justify-between gap-3 text-sm">
-              <p className="text-zinc-300" aria-live="polite">
-                {sourceTracks.length === 0 ? (
-                  <>None of the {importInfo.total} songs in “{source.name}” are in the dataset. Pick seeds by search instead.</>
-                ) : (
-                  <>
-                    Found {sourceTracks.length} of {importInfo.total} songs from “{source.name}”
-                    {importInfo.loose > 0 && (
-                      <span className="text-zinc-500"> ({importInfo.loose} matched by title &amp; artist)</span>
-                    )}
-                    . Pick up to {MAX_START_SEEDS} as seeds.
-                  </>
-                )}
-              </p>
-              <button
-                onClick={() => {
-                  setSource(null);
-                  setSourceTracks([]);
-                  setImportInfo(null);
-                  setImportMsg(null);
-                }}
-                className="shrink-0 text-zinc-500 hover:text-zinc-300"
-              >
-                Clear
-              </button>
-            </div>
-            {sourceTracks.length > 0 && (
-              <PickList tracks={sourceTracks} onPick={add} isSeed={isSeed} disabled={full} scroll
-                preview={preview} />
-            )}
-            {importInfo.unmatched.length > 0 && (
-              <details className="text-sm text-zinc-500">
-                <summary className="cursor-pointer hover:text-zinc-300">
-                  {importInfo.missing} not in the dataset (released after 2018 or too rare)
-                </summary>
-                <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto pl-4">
-                  {importInfo.unmatched.map((u) => (
-                    <li key={u} className="truncate">{u}</li>
-                  ))}
-                  {importInfo.missing > importInfo.unmatched.length && (
-                    <li>…and {importInfo.missing - importInfo.unmatched.length} more</li>
-                  )}
-                </ul>
-              </details>
-            )}
-          </div>
+        {linkMode && !importing && !importMsg && (
+          <p className="label text-dim">Press Enter to load the playlist&apos;s songs</p>
+        )}
+
+        {!full && !linkMode && results.length > 0 && (
+          <PickList tracks={results} onPick={add} isSeed={isSeed} preview={preview} />
+        )}
+
+        {!searching && !error && !linkMode && query.trim().length >= 2 && results.length === 0 && (
+          <p className="text-sm text-dim">No songs found. Only songs in the playlist and listening datasets are searchable.</p>
         )}
       </section>
+
+      {source && importInfo && (
+        <section aria-label="Pasted playlist" className="space-y-3 border-t border-line pt-6">
+          <div className="flex items-start justify-between gap-3 text-sm">
+            <p className="text-muted" aria-live="polite">
+              {sourceTracks.length === 0 ? (
+                <>None of the {importInfo.total} songs in “{source.name}” are in the dataset. Pick seeds by search instead.</>
+              ) : (
+                <>
+                  Found {sourceTracks.length} of {importInfo.total} songs from{" "}
+                  <span className="text-text">“{source.name}”</span>
+                  {importInfo.loose > 0 && <span className="text-dim"> ({importInfo.loose} matched by title &amp; artist)</span>}
+                  . Pick up to {MAX_START_SEEDS} as seeds.
+                </>
+              )}
+            </p>
+            <button
+              onClick={() => {
+                setSource(null);
+                setSourceTracks([]);
+                setImportInfo(null);
+                setImportMsg(null);
+              }}
+              className="label shrink-0 text-dim hover:text-text"
+            >
+              Clear
+            </button>
+          </div>
+          {sourceTracks.length > 0 && (
+            <PickList tracks={sourceTracks} onPick={add} isSeed={isSeed} disabled={full} scroll preview={preview} />
+          )}
+          {importInfo.unmatched.length > 0 && (
+            <details className="text-sm text-dim">
+              <summary className="cursor-pointer hover:text-muted">
+                {importInfo.missing} not in the dataset (too new or too rare)
+              </summary>
+              <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto pl-4">
+                {importInfo.unmatched.map((u) => (
+                  <li key={u} className="truncate">{u}</li>
+                ))}
+                {importInfo.missing > importInfo.unmatched.length && (
+                  <li>…and {importInfo.missing - importInfo.unmatched.length} more</li>
+                )}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
+
+      {(seeds.length > 0 || source || latest) && (
+        <div className="flex justify-end">
+          <button
+            onClick={startOver}
+            className="label text-dim hover:text-text"
+            title="Forget the picked seeds, the pasted playlist and your last set"
+          >
+            Start over
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -329,25 +363,22 @@ function PickList({
   scroll?: boolean;
 }) {
   return (
-    <ul className={`divide-y divide-zinc-800/60 rounded-lg border border-zinc-800 ${scroll ? "max-h-80 overflow-y-auto" : ""}`}>
+    <ul className={`overflow-hidden rounded-md border border-line bg-panel/60 ${scroll ? "max-h-80 overflow-y-auto" : ""}`}>
       {tracks.map((t) => (
-        <li key={t.track_uri} className="flex items-center gap-1 pl-3">
-          <PreviewButton name={t.name} state={preview.state(t.track_uri)}
-                         onClick={() => void preview.toggle(t.track_uri)} />
+        <li key={t.track_uri} className="flex items-center gap-1 border-b border-line/60 pl-3 last:border-b-0">
+          <PreviewButton name={t.name} state={preview.state(t.track_uri)} onClick={() => void preview.toggle(t.track_uri)} />
           <button
             onClick={() => onPick(t)}
             disabled={disabled || isSeed(t)}
             aria-pressed={isSeed(t)}
-            className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left hover:bg-white/5 disabled:opacity-40"
+            className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left hover:bg-raised/60 disabled:opacity-40"
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate">{t.name}</p>
-              <p className="truncate text-sm text-zinc-400">{t.artist}</p>
+              <p className="truncate text-sm font-semibold">{t.name}</p>
+              <p className="truncate text-xs text-muted">{t.artist}</p>
             </div>
-            <span className="shrink-0 text-xs text-zinc-500 tabular-nums">
-              {formatCount(t.playlist_count)} playlists
-            </span>
-            <PlusIcon className="h-4 w-4 shrink-0 text-zinc-400" />
+            <span className="label shrink-0 text-dim tabular-nums">{formatCount(t.playlist_count)} playlists</span>
+            <PlusIcon className="h-4 w-4 shrink-0 text-pink" />
           </button>
         </li>
       ))}

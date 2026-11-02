@@ -18,7 +18,8 @@ import { currentSession } from "@/lib/session";
 import { readSource } from "@/lib/source";
 import { clearAll, readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
 import { usePreview } from "@/lib/use-preview";
-import { Spinner, XIcon } from "./icons";
+import { Bars, XIcon } from "./icons";
+import { Ticker } from "./night";
 import SavePanel from "./save-panel";
 import TrackRow from "./track-row";
 
@@ -239,104 +240,104 @@ export default function ResultsScreen() {
   if (seeds.length === 0) {
     return (
       <div className="space-y-4">
-        <p className="text-zinc-400">No seeds picked yet.</p>
-        <Link href="/" className="text-emerald-400 hover:underline">← Pick some songs</Link>
+        <p className="text-muted">No seeds picked yet.</p>
+        <Link href="/" className="text-pink hover:underline">← Pick some songs</Link>
       </div>
     );
   }
 
+  const fill = `${Math.round(slider * 100)}%`;
+
   return (
-    <div className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          {/* `fresh` remounts the kept-alive Seed screen so it re-reads the saved draft and vibe. */}
-          <button
-            onClick={() => router.push(`/?fresh=${Date.now().toString(36)}`)}
-            className="block text-sm text-zinc-500 hover:text-zinc-300"
-          >
-            ← Edit seeds
-          </button>
-          <h1 className="text-2xl font-semibold tracking-tight">Your vibe</h1>
-        </div>
-        <div className="flex flex-col items-end gap-1 pt-1">
-          <button
-            onClick={startOver}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-white/5"
-            title="Forget this vibe, its kept songs and the pasted playlist"
-          >
-            Start over
-          </button>
-          <span className="text-sm text-zinc-400 tabular-nums">{kept.size} kept</span>
-        </div>
-      </header>
+    <div className="space-y-7">
+      <div className="flex items-center justify-between gap-4">
+        {/* `fresh` remounts the kept-alive Seed screen so it re-reads the saved draft and vibe. */}
+        <button onClick={() => router.push(`/?fresh=${Date.now().toString(36)}`)} className="label text-muted hover:text-text">
+          ← Edit seeds
+        </button>
+        <button
+          onClick={startOver}
+          className="label text-dim hover:text-text"
+          title="Forget this set, its kept songs and the pasted playlist"
+        >
+          Start over
+        </button>
+      </div>
+
+      <Ticker items={seedTracks.map((s) => s.name)} empty="Now loaded ▸ …" />
 
       <section aria-label="Seeds" className="flex flex-wrap gap-2">
-        {seedTracks.map((s) => (
-          <span key={s.track_uri} className="flex items-center gap-1.5 rounded-full bg-zinc-800 py-1 pl-3 pr-1 text-sm">
-            <span className="max-w-56 truncate">
-              {s.name} <span className="text-zinc-500">· {s.artist}</span>
-            </span>
+        {seedTracks.map((s, i) => (
+          <span key={s.track_uri} className="flex items-center gap-2 rounded-md border border-line bg-panel py-1.5 pl-2.5 pr-1 text-xs">
+            <span className="font-mono text-pink">{String(i + 1).padStart(2, "0")}</span>
+            <span className="max-w-48 truncate font-semibold" title={`${s.name} · ${s.artist}`}>{s.name}</span>
             <button
               onClick={() => removeSeed(s.track_uri)}
               disabled={seeds.length <= 1}
-              className="rounded-full p-1 text-zinc-400 hover:bg-white/10 disabled:invisible"
+              className="rounded p-1 text-muted hover:bg-white/5 hover:text-text disabled:invisible"
               aria-label={`Remove seed ${s.name}`}
             >
-              <XIcon className="h-3.5 w-3.5" />
+              <XIcon className="h-3 w-3" />
             </button>
           </span>
         ))}
       </section>
 
-      <section className="space-y-2">
-        <label htmlFor="vibe" className="flex justify-between text-sm text-zinc-400">
-          <span>Familiar</span>
-          <span>Adventurous</span>
-        </label>
-        <input
-          id="vibe"
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={slider}
-          onChange={(e) => onSlider(Number(e.target.value))}
-          className="w-full"
-          aria-valuetext={`${Math.round(slider * 100)}% adventurous`}
-        />
-        {source && (source.trackUris?.length ?? 0) > 0 && (
-          <label className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
-            <input type="checkbox" checked={hideSource} onChange={(e) => toggleHideSource(e.target.checked)} />
-            Hide songs already in “{source.name}”
-            <span className="text-zinc-500">({source.trackUris?.length})</span>
+      <section className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+        <h1 className="font-display text-xl tracking-[0.18em]">The set</h1>
+        <div className="w-full space-y-2 sm:w-80">
+          <label htmlFor="vibe" className="label flex justify-between text-muted">
+            <span>Familiar</span>
+            <span className="text-pink tabular-nums">{String(Math.round(slider * 100)).padStart(3, "0")}</span>
+            <span>Adventurous</span>
           </label>
-        )}
+          <input
+            id="vibe"
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={slider}
+            onChange={(e) => onSlider(Number(e.target.value))}
+            className="slider w-full"
+            style={{ "--fill": fill } as React.CSSProperties}
+            aria-valuetext={`${Math.round(slider * 100)}% adventurous`}
+          />
+        </div>
       </section>
 
+      {source && (source.trackUris?.length ?? 0) > 0 && (
+        <label className="flex items-center gap-2 text-sm text-muted">
+          <input type="checkbox" checked={hideSource} onChange={(e) => toggleHideSource(e.target.checked)} />
+          Hide songs already in “{source.name}”
+          <span className="text-dim">({source.trackUris?.length})</span>
+        </label>
+      )}
+
       {notice && (
-        <p className="flex items-center justify-between rounded-lg bg-zinc-900 px-3 py-2 text-sm text-zinc-300">
+        <p className="flex items-center justify-between rounded-md border border-line bg-panel px-3 py-2 text-sm text-muted">
           {notice}
-          <button onClick={() => setNotice(null)} aria-label="Dismiss" className="p-1 text-zinc-500 hover:text-zinc-200">
+          <button onClick={() => setNotice(null)} aria-label="Dismiss" className="p-1 text-dim hover:text-text">
             <XIcon className="h-3.5 w-3.5" />
           </button>
         </p>
       )}
 
       {status === "loading" && (
-        <div className="flex items-center gap-2 py-12 text-zinc-500">
-          <Spinner className="h-5 w-5" /> Finding songs…
+        <div className="label flex items-center gap-3 py-12 text-pink">
+          <Bars playing className="h-4" /> Cutting your set…
         </div>
       )}
 
       {status === "error" && (
-        <div role="alert" className="space-y-3 rounded-lg border border-red-500/30 bg-red-500/5 p-4">
-          <p className="text-red-300">{error}</p>
+        <div role="alert" className="space-y-3 rounded-md border border-pink/40 bg-pink/5 p-4">
+          <p className="text-pink-soft">{error}</p>
           <button
             onClick={() => {
               setStatus("loading");
               void load(seeds, slider);
             }}
-            className="text-sm text-zinc-300 underline"
+            className="label text-text underline"
           >
             Try again
           </button>
@@ -344,11 +345,11 @@ export default function ResultsScreen() {
       )}
 
       {status === "ready" && list.length === 0 && (
-        <p className="py-12 text-zinc-500">No recommendations for these seeds. Try different songs.</p>
+        <p className="py-12 text-dim">No recommendations for these seeds. Try different songs.</p>
       )}
 
       {status === "ready" && list.length > 0 && (
-        <ol className="space-y-1">
+        <ol className="border-t border-line/70">
           {list.map((t, i) => (
             <TrackRow
               key={t.track_uri}

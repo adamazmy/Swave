@@ -5,7 +5,7 @@ import SeedScreen from "@/components/seed-client";
 // (inside Suspense because it reads ?fresh= with useSearchParams).
 export default function Home() {
   return (
-    <Suspense fallback={<p className="py-12 text-zinc-500">Loading…</p>}>
+    <Suspense fallback={<p className="py-12 label text-dim">Loading…</p>}>
       <SeedScreen />
     </Suspense>
   );

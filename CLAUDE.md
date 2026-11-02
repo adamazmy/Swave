@@ -60,7 +60,7 @@ web/                 Next.js 16 app (2 screens: Seed, Results). Read web/AGENTS.
                      reset on navigation and effects re-run when a page is shown again. Results is
                      keyed by a `run` URL param (new per vibe) and its first-load effect is a no-op
                      when the list already exists. Read web/node_modules/next/dist/docs/01-app/02-guides/preserving-ui-state.md
-  components/        seed-screen, results-screen, track-row, icons
+  components/        seed-screen, results-screen, track-row, save-panel, icons, night (v3 theme pieces)
   lib/               api.ts (typed client), playlist.ts (pure list logic + vitest), session.ts
 eval/results.csv     metrics history (no track data)
 data/raw/            dataset (gitignored, never committed)

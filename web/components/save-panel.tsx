@@ -25,10 +25,11 @@ type Mode = "new" | "add";
 type Result = { text: string; url: string | null; warning?: string };
 
 const btn =
-  "rounded-lg px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400";
-const primary = `${btn} bg-emerald-500 text-zinc-950 hover:bg-emerald-400`;
-const secondary = `${btn} border border-zinc-700 text-zinc-200 hover:bg-white/5`;
-const small = "rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-white/5 disabled:opacity-40";
+  "btn-label rounded-md px-4 py-3 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink";
+const primary = `${btn} bg-pink px-6 text-ink hover:bg-pink-soft`;
+const secondary = `${btn} border border-line text-text hover:border-pink/50`;
+const small = "label rounded border border-line px-2.5 py-1 text-text hover:border-pink/50 disabled:opacity-40";
+const field = "rounded-md border border-line bg-panel px-3 py-2.5 text-sm outline-none placeholder:text-dim focus:border-pink/60";
 
 /**
  * Sticky bottom bar.
@@ -162,9 +163,9 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
     );
 
   return (
-    <div className="sticky bottom-0 -mx-4 max-h-[80vh] overflow-y-auto border-t border-zinc-800 bg-[#0a0a0b]/95 px-4 py-3 backdrop-blur">
+    <div className="sticky bottom-0 -mx-4 max-h-[80vh] overflow-y-auto border-t border-line bg-ink/95 px-4 py-4 backdrop-blur sm:-mx-8 sm:px-8">
       {source && (
-        <div role="tablist" aria-label="Save to" className="mb-3 inline-flex rounded-lg bg-zinc-900 p-1 text-sm">
+        <div role="tablist" aria-label="Save to" className="mb-3 inline-flex rounded-md border border-line bg-panel p-1 text-sm">
           {(["new", "add"] as const).map((m) => (
             <button
               key={m}
@@ -175,7 +176,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
                 setResult(null);
                 setError(null);
               }}
-              className={`max-w-64 truncate rounded-md px-3 py-1.5 ${mode === m ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:text-zinc-200"}`}
+              className={`max-w-64 truncate rounded-md px-3 py-1.5 ${mode === m ? "bg-wine text-text" : "text-muted hover:text-text"}`}
             >
               {m === "new" ? "New playlist" : `Add to “${source.name}”`}
             </button>
@@ -184,7 +185,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
       )}
 
       {mode === "new" && customise && (
-        <div className="mb-3 flex flex-wrap gap-4 rounded-lg border border-zinc-800 p-3">
+        <div className="mb-3 flex flex-wrap gap-4 rounded-md border border-line bg-panel p-3">
           <div className="flex flex-col items-start gap-2">
             {details.cover ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -194,7 +195,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
                 className="h-28 w-28 rounded-md object-cover"
               />
             ) : (
-              <div className="grid h-28 w-28 place-items-center rounded-md border border-dashed border-zinc-700 text-xs text-zinc-500">
+              <div className="grid h-28 w-28 place-items-center rounded-md border border-dashed border-line text-xs text-dim">
                 No cover
               </div>
             )}
@@ -221,7 +222,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
             </div>
           </div>
           <div className="flex min-w-48 flex-1 flex-col gap-2">
-            <label className="text-xs text-zinc-400" htmlFor="playlist-desc">
+            <label className="label text-muted" htmlFor="playlist-desc">
               Description
             </label>
             <textarea
@@ -230,13 +231,13 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
               onChange={(e) => onDetails({ description: e.target.value })}
               maxLength={300}
               rows={3}
-              className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-emerald-500/60"
+              className={field}
             />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-dim">
               Spotify makes playlists created by apps public. To hide it, open it in Spotify → ⋯ → Make private.
             </p>
             {coverBlocked && (
-              <p className="text-xs text-amber-300">
+              <p className="text-xs text-cream">
                 Covers need one more Spotify permission.{" "}
                 <button onClick={connect} className="underline">
                   Reconnect Spotify
@@ -248,6 +249,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        <span className="label mr-2 text-cream tabular-nums">{String(n).padStart(2, "0")} kept</span>
         {mode === "new" ? (
           <>
             <label htmlFor="playlist-name" className="sr-only">
@@ -259,14 +261,14 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
               onChange={(e) => onDetails({ name: e.target.value })}
               maxLength={100}
               placeholder="Playlist name"
-              className="min-w-0 flex-1 basis-48 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-emerald-500/60"
+              className={`${field} min-w-0 flex-1 basis-48`}
             />
             <button onClick={() => setCustomise((c) => !c)} aria-expanded={customise} className={secondary}>
               {customise ? "Hide options" : "Customise"}
             </button>
           </>
         ) : (
-          <p className="min-w-0 flex-1 basis-48 text-sm text-zinc-400">
+          <p className="min-w-0 flex-1 basis-48 text-sm text-muted">
             Appends your kept songs to “{source?.name}”. Songs already in it are skipped; nothing is removed.
           </p>
         )}
@@ -274,11 +276,11 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
         {connected ? (
           mode === "new" ? (
             <button onClick={() => void saveNew(false)} disabled={n === 0 || busy} className={primary}>
-              {busy ? <Spinner className="inline h-4 w-4" /> : saved ? `Update playlist (${n})` : `Save ${n} to Spotify`}
+              {busy ? <Spinner className="inline h-4 w-4" /> : saved ? "Update the set" : "Save the set"}
             </button>
           ) : (
             <button onClick={() => void addToSource()} disabled={n === 0 || busy} className={primary}>
-              {busy ? <Spinner className="inline h-4 w-4" /> : `Add ${n} songs`}
+              {busy ? <Spinner className="inline h-4 w-4" /> : `Add ${n} to playlist`}
             </button>
           )
         ) : auth?.configured ? (
@@ -291,18 +293,18 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
         </button>
       </div>
 
-      <p className="mt-1.5 text-xs text-zinc-500" aria-live="polite">
+      <p className="mt-2 text-xs text-dim" aria-live="polite">
         {result ? (
           <>
-            <span className="text-emerald-300">
+            <span className="text-pink-soft">
               {result.text} {link(result.url)}
             </span>
-            {result.warning && <span className="block text-amber-300">{result.warning}</span>}
+            {result.warning && <span className="block text-cream">{result.warning}</span>}
           </>
         ) : error ? (
-          <span className="text-red-300">{error}</span>
+          <span className="text-pink">{error}</span>
         ) : n === 0 ? (
-          "Keep songs (✓) to build your playlist."
+          "Keep songs to build your set."
         ) : auth && !auth.configured ? (
           "Spotify isn't set up (SPOTIFY_CLIENT_ID missing in .env). Export a CSV instead."
         ) : mode === "new" && saved && connected ? (
@@ -320,7 +322,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
             <button
               onClick={() => void saveNew(true)}
               disabled={n === 0 || busy}
-              className="underline hover:text-zinc-300 disabled:opacity-40"
+              className="underline hover:text-text disabled:opacity-40"
             >
               Save as new playlist
             </button>

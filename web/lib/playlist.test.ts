@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   addSeed,
+  isPlaylistLink,
+  shortReason,
   mergeKept,
   parseSeeds,
   refreshKept,
@@ -90,5 +92,26 @@ describe("clampSlider", () => {
     expect(clampSlider(-1)).toBe(0);
     expect(clampSlider(0.4)).toBe(0.4);
     expect(clampSlider(3)).toBe(1);
+  });
+});
+
+describe("isPlaylistLink", () => {
+  it("spots playlist links and URIs, not searches", () => {
+    expect(isPlaylistLink("https://open.spotify.com/playlist/abc123?si=x")).toBe(true);
+    expect(isPlaylistLink("https://open.spotify.com/intl-fr/playlist/abc123")).toBe(true);
+    expect(isPlaylistLink(" spotify:playlist:abc123")).toBe(true);
+    expect(isPlaylistLink("https://open.spotify.com/track/abc123")).toBe(false);
+    expect(isPlaylistLink("playlist love songs")).toBe(false);
+  });
+});
+
+describe("shortReason", () => {
+  it("drops 'appears' and a repeated 'with … in'", () => {
+    expect(shortReason("appears with your seed in 40 shared playlists · appears with your seed in 3 listening sessions"))
+      .toBe("with your seed in 40 shared playlists · 3 listening sessions");
+    expect(shortReason("appears with 2 of your 3 seeds in 9 shared playlists · appears with 1 of your 3 seeds in 4 listening sessions"))
+      .toBe("with 2 of your 3 seeds in 9 shared playlists · with 1 of your 3 seeds in 4 listening sessions");
+    expect(shortReason("appears with your seed in 7 listening sessions")).toBe("with your seed in 7 listening sessions");
+    expect(shortReason("")).toBe("");
   });
 });

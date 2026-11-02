@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 // which must not be compared against server-rendered HTML.
 const ResultsScreen = dynamic(() => import("./results-screen"), {
   ssr: false,
-  loading: () => <p className="py-12 text-zinc-500">Loading…</p>,
+  loading: () => <p className="py-12 label text-dim">Loading…</p>,
 });
 
 /**

@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 // first render, which must not be compared against server-rendered HTML.
 const SeedScreen = dynamic(() => import("./seed-screen"), {
   ssr: false,
-  loading: () => <p className="py-12 text-zinc-500">Loading…</p>,
+  loading: () => <p className="py-12 label text-dim">Loading…</p>,
 });
 
 /**

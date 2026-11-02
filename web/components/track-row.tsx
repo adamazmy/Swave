@@ -1,5 +1,6 @@
 import type { Recommendation } from "@/lib/api";
-import { CheckIcon, PauseIcon, PlayIcon, PlusIcon, Spinner, XIcon } from "./icons";
+import { shortReason } from "@/lib/playlist";
+import { Bars, PauseIcon, PlayIcon, PlusIcon, Spinner, XIcon } from "./icons";
 
 export type PreviewState = "idle" | "loading" | "playing" | "unavailable";
 
@@ -16,64 +17,68 @@ type Props = {
   onRemove: () => void;
 };
 
-const iconBtn =
-  "rounded-md p-2 text-zinc-400 hover:bg-white/10 hover:text-zinc-100 disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-2 focus-visible:outline-emerald-400";
+const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink";
+const chip = `btn-label rounded-md border px-2.5 py-2 transition disabled:cursor-not-allowed disabled:opacity-30 ${focus}`;
 
 export default function TrackRow(p: Props) {
   const { track: t } = p;
   return (
     <li
-      className={`flex items-center gap-3 rounded-lg border px-2 py-2 transition sm:px-3 ${
-        p.kept ? "border-emerald-500/40 bg-emerald-500/5" : "border-transparent hover:bg-white/[0.03]"
+      className={`flex items-center gap-3 border-b border-line/70 px-2 py-2.5 transition sm:px-3 ${
+        p.kept ? "bg-wine/45" : "hover:bg-raised/60"
       } ${p.pending ? "opacity-40" : ""}`}
     >
-      <span className="hidden w-6 shrink-0 text-right text-xs text-zinc-600 tabular-nums sm:block">
-        {p.position + 1}
+      <span className="label hidden w-6 shrink-0 text-pink/70 tabular-nums sm:block">
+        {String(p.position + 1).padStart(2, "0")}
       </span>
 
       <PreviewButton name={t.name} state={p.preview} disabled={p.pending} onClick={p.onPreview} />
 
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{t.name}</p>
-        <p className="truncate text-sm text-zinc-400">{t.artist}</p>
-        <p className="truncate text-xs text-zinc-500">{t.reason}</p>
+        <p className="truncate text-sm font-semibold">{t.name}</p>
+        <p className="truncate text-xs text-muted">
+          {t.artist}
+          {t.reason && <span className="text-dim" title={t.reason}> · {shortReason(t.reason)}</span>}
+        </p>
       </div>
 
-      <div className="flex shrink-0 items-center">
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          onClick={p.onMore}
+          disabled={p.pending || !p.canAddSeed}
+          className={`${chip} border-line text-text hover:border-pink/60 hover:text-pink-soft`}
+          aria-label={`More like ${t.name}`}
+          title={p.canAddSeed ? "More like this (adds it as a seed)" : "Seed limit reached"}
+        >
+          <span className="hidden sm:inline">More like this</span>
+          <PlusIcon className="h-3.5 w-3.5 sm:hidden" />
+        </button>
         <button
           onClick={p.onKeep}
           disabled={p.pending}
           aria-pressed={p.kept}
-          className={`${iconBtn} ${p.kept ? "text-emerald-400" : ""}`}
+          className={`${chip} min-w-14 ${
+            p.kept ? "border-cream bg-cream text-ink hover:bg-cream/85" : "border-cream/50 text-cream hover:bg-cream/10"
+          }`}
           aria-label={p.kept ? `Un-keep ${t.name}` : `Keep ${t.name}`}
-          title={p.kept ? "Kept" : "Keep"}
         >
-          <CheckIcon />
-        </button>
-        <button
-          onClick={p.onMore}
-          disabled={p.pending || !p.canAddSeed}
-          className={iconBtn}
-          aria-label={`More like ${t.name}`}
-          title={p.canAddSeed ? "More like this (adds it as a seed)" : "Seed limit reached"}
-        >
-          <PlusIcon />
+          {p.kept ? "Kept" : "Keep"}
         </button>
         <button
           onClick={p.onRemove}
           disabled={p.pending}
-          className={iconBtn}
+          className={`rounded-md p-2 text-muted hover:bg-white/5 hover:text-text disabled:opacity-30 ${focus}`}
           aria-label={`Remove ${t.name}`}
           title="Remove (replace with the next best)"
         >
-          <XIcon />
+          <XIcon className="h-3.5 w-3.5" />
         </button>
       </div>
     </li>
   );
 }
 
-/** Round play/pause button for a track's 30-second preview. */
+/** Square preview button: level bars at rest (a play icon on hover), bouncing bars while playing. */
 export function PreviewButton({
   name,
   state,
@@ -85,18 +90,31 @@ export function PreviewButton({
   disabled?: boolean;
   onClick: () => void;
 }) {
+  const playing = state === "playing";
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={state === "unavailable" || disabled}
-      className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${
-        state === "playing" ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
-      } disabled:bg-zinc-900 disabled:text-zinc-600`}
-      aria-label={state === "playing" ? `Pause ${name}` : `Play preview of ${name}`}
+      className={`group grid h-9 w-9 shrink-0 place-items-center rounded-md border transition ${
+        playing ? "border-pink bg-pink/15 text-pink" : "border-line bg-panel text-pink-soft hover:border-pink/60"
+      } disabled:cursor-not-allowed disabled:border-line/50 disabled:text-dim/60 ${focus}`}
+      aria-label={playing ? `Pause ${name}` : `Play preview of ${name}`}
       title={state === "unavailable" ? "No preview available" : "30-second preview"}
     >
-      {state === "loading" ? <Spinner /> : state === "playing" ? <PauseIcon /> : <PlayIcon />}
+      {state === "loading" ? (
+        <Spinner />
+      ) : playing ? (
+        <>
+          <Bars playing className="h-3.5 group-hover:hidden" />
+          <PauseIcon className="hidden h-3.5 w-3.5 group-hover:block" />
+        </>
+      ) : (
+        <>
+          <Bars className="h-3.5 group-hover:hidden group-disabled:block" />
+          <PlayIcon className="hidden h-3.5 w-3.5 group-hover:block group-disabled:hidden" />
+        </>
+      )}
     </button>
   );
 }
