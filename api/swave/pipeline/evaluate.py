@@ -3,6 +3,8 @@
 Seeds: 5 tracks per playlist, drawn with a fixed RNG seeded by pid. Hidden: the rest.
 Neighbours are computed on the fly from the training matrix with exactly the same function as
 build-index (incl. top-k truncation), so eval needs no index build and can compare methods/k/alpha.
+Scoring goes through the same ranker as the API (`recommend.combine` / `penalise`) with the scorer
+weights from `--scorers` (default: scorers.json), which are logged in the `scorers` column.
 Appends one metrics-only row to eval/results.csv (no track data).
 """
 
@@ -16,12 +18,12 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from swave import cooc
+from swave import cooc, scorers
+from swave import recommend as rk
 from swave.config import EVAL_CSV, ROOT, connect
-from swave.recommend import score
 
 CSV_FIELDS = ["date", "git", "method", "k", "min_co", "alpha", "n_eval", "seeds", "at",
-              "hit_rate", "recall", "seconds"]
+              "hit_rate", "recall", "seconds", "scorers"]
 
 
 def git_hash() -> str:
@@ -49,7 +51,9 @@ def main() -> None:
     ap.add_argument("--alpha", type=float, default=0.0)
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--at", type=int, default=50)
+    ap.add_argument("--scorers", default=None, help="weights config (default: scorers.json)")
     args = ap.parse_args()
+    weights = rk.load_weights(args.scorers)
     t0 = time.time()
 
     with connect() as conn:
@@ -83,12 +87,12 @@ def main() -> None:
         for s, a, b in zip(part, *bounds):
             nb[int(s)] = (nbr[a:b], sim[a:b], co[a:b])
 
+    active = [(scorers.Cooccurrence("cooccurrence_mpd", scorers.from_dict(nb)), w)
+              for name, w in weights.items() if name == "cooccurrence_mpd"]
     hits, recalls = [], []
     for seeds, hidden in split.values():
-        lists = [nb[int(s)] for s in seeds]
-        nbr = np.concatenate([x[0] for x in lists])
-        res = score(nbr, np.concatenate([x[1] for x in lists]), np.concatenate([x[2] for x in lists]),
-                    pop[nbr], args.alpha, seeds, args.at)
+        comb = rk.combine(active, seeds, None, lambda t: pop[t])
+        res = rk.penalise(comb, args.alpha, seeds, args.at)
         h, r = metrics(res.track, hidden)
         hits.append(h)
         recalls.append(r)
@@ -98,11 +102,11 @@ def main() -> None:
         "git": git_hash(), "method": args.method, "k": args.k, "min_co": args.min_co,
         "alpha": args.alpha, "n_eval": len(split), "seeds": args.seeds, "at": args.at,
         "hit_rate": f"{np.mean(hits):.4f}", "recall": f"{np.mean(recalls):.4f}",
-        "seconds": f"{time.time() - t0:.0f}",
+        "seconds": f"{time.time() - t0:.0f}", "scorers": rk.weights_label(weights),
     }
     print(f"eval {row['git']} {args.method} k={args.k} min_co={args.min_co} alpha={args.alpha} "
-          f"n={len(split)}: hit-rate@{args.at}={row['hit_rate']} recall@{args.at}={row['recall']} "
-          f"({row['seconds']}s)")
+          f"[{row['scorers']}] n={len(split)}: hit-rate@{args.at}={row['hit_rate']} "
+          f"recall@{args.at}={row['recall']} ({row['seconds']}s)")
 
     EVAL_CSV.parent.mkdir(parents=True, exist_ok=True)
     new = not EVAL_CSV.exists() or EVAL_CSV.stat().st_size == 0

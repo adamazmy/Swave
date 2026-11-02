@@ -33,7 +33,7 @@ build-index: db     ## top-K neighbours per track -> neighbours table
 	$(VENV_PY) -m swave.pipeline.build_index --method $(METHOD) --k $(K) --min-co $(MIN_CO)
 
 eval: db            ## hit-rate@50 / recall@50 on held-out playlists -> eval/results.csv
-	$(VENV_PY) -m swave.pipeline.evaluate --method $(METHOD) --k $(K) --min-co $(MIN_CO) --alpha $(ALPHA)
+	$(VENV_PY) -m swave.pipeline.evaluate --method $(METHOD) --k $(K) --min-co $(MIN_CO) --alpha $(ALPHA) $(if $(SCORERS),--scorers $(SCORERS))
 
 api: db             ## FastAPI on http://127.0.0.1:8000 (docs at /docs), auto-reload
 	$(VENV_PY) -m uvicorn swave.main:create_app --factory --reload --reload-dir api/swave --host 127.0.0.1 --port 8000

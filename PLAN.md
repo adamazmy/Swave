@@ -109,3 +109,17 @@ Follow-ups (not now): recommender v2 deeper candidate pool so popular vibes can 
 2. Dataset: **read straight from the zip** in `data/raw/` (no 33.5 GB unzip).
 3. Neighbours: **build top-200**, and evaluate top-100 too.
 4. Vite + Supabase starter: **deleted** (in git history).
+
+---
+
+# Swave v2
+
+v1 is tagged `v1` (370d069). Out of scope for now: personalisation, Spotify playlist picker, branding.
+
+## V2-M1 result (2026-11-02): pluggable scoring, no behaviour change
+
+- `scorers.py`: `Scorer` interface (`candidates(seeds, adventure)` → track, raw, top, reason data; `reason()`), first scorer `cooccurrence_mpd` (neighbour lookup from the DB for the API, from memory for eval).
+- `recommend.py`: ranker = weighted sum of normalised scores (weights in `scorers.json`) → popularity penalty from the slider (`alpha_for` unchanged) → seeds/excluded removed. Reason = top contributing scorer(s), ` · `-joined.
+- Eval takes `--scorers` (`make eval SCORERS=…`), logs weights in a new `scorers` column (earlier rows back-filled `cooccurrence_mpd=1`).
+- **Proof of no change**: (1) 121 captured v1 `/recommend` requests (1–5 seeds, n 1–100, raw alpha + slider 0/0.35/0.7/1, exclude, exclude_songs, unknown seed) replayed: 5,752 rows, 0 differences in order, score (bit-for-bit), alpha, reason, counts. (2) v1 `score()` vs ranker on all 1,000 eval seed sets × alpha {0, 0.1, 0.5, 1, 2}: 0/5,000 lists differ; slider alpha 0/2,000 differ. (3) `make eval`: 0.9080 / 0.1960 (alpha 0), 0.8810 / 0.1852 (alpha 0.1), same as v1.
+- Found on the way: normalising by the top score merged 1-ulp-apart scores into ties (2/5,000 lists swapped neighbours). Fixed by ranking on the sum rescaled to the first scorer's raw units.

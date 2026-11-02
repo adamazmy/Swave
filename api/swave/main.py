@@ -17,9 +17,9 @@ from fastapi.responses import RedirectResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, StringConstraints
 
-from swave import deezer, matching, spotify
+from swave import deezer, matching, recommend as rk, scorers, spotify
 from swave.config import database_url
-from swave.recommend import MAX_ALPHA, alpha_for, score
+from swave.recommend import MAX_ALPHA
 
 TRACK_URI = r"^spotify:track:[A-Za-z0-9]{22}$"
 ACTIONS = ("shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved")
@@ -157,11 +157,6 @@ class AuthStatus(BaseModel):
     can_upload_cover: bool  # false for logins made before the ugc-image-upload scope existed
 
 
-def reason(hits: int, n_seeds: int, co: int) -> str:
-    seeds = "your seed" if n_seeds == 1 else f"{hits} of your {n_seeds} seeds"
-    return f"appears with {seeds} in {co:,} shared playlists"
-
-
 def escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -170,7 +165,10 @@ def with_param(url: str, **params: str) -> str:
     return url + ("&" if "?" in url else "?") + urlencode(params)
 
 
-def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> FastAPI:
+def create_app(dsn: str | None = None, http: httpx.Client | None = None,
+               weights: dict[str, float] | None = None) -> FastAPI:
+    # Scorer weights are read once at startup (restart the API after editing scorers.json).
+    weights = weights or rk.load_weights()
     pool = ConnectionPool(dsn or database_url(), min_size=1, max_size=8, open=False)
     http = http or httpx.Client(timeout=10.0)
     origins = [o.strip() for o in os.environ.get(
@@ -247,27 +245,33 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
             unknown = [u for u in body.seeds if u not in ids]
             if not seed_ids:
                 raise HTTPException(404, "None of the seed tracks are in the index")
-            rows = conn.execute(
-                """SELECT n.neighbour_id, n.sim, n.co_count, t.playlist_count
-                   FROM neighbours n JOIN tracks t ON t.track_id = n.neighbour_id
-                   WHERE n.track_id = ANY(%s)""",
-                (seed_ids,),
-            ).fetchall()
-            arr = np.array(rows, dtype=np.float64).reshape(-1, 4)
+            active = [(scorers.Cooccurrence("cooccurrence_mpd", scorers.from_db(conn)), w)
+                      for name, w in weights.items() if name == "cooccurrence_mpd"]
+
+            def pop_of(tids: np.ndarray) -> np.ndarray:
+                pc = dict(conn.execute(
+                    "SELECT track_id, playlist_count FROM tracks WHERE track_id = ANY(%s)",
+                    (tids.astype(np.int64).tolist(),)).fetchall())
+                return np.array([pc.get(int(t), 0) for t in tids], dtype=np.float64)
+
+            comb = rk.combine(active, np.array(seed_ids), body.adventure, pop_of)
             excluded = seed_ids + [ids[u] for u in body.exclude if u in ids]
-            if body.exclude_songs and len(arr):
+            if body.exclude_songs and len(comb.track):
                 keys = {matching.song_key(r[0], r[1]) for r in conn.execute(
                     "SELECT name, artist FROM tracks WHERE track_uri = ANY(%s)",
                     (body.exclude_songs,)).fetchall()}
                 excluded += [r[0] for r in conn.execute(
                     "SELECT track_id, name, artist FROM tracks WHERE track_id = ANY(%s)",
-                    (np.unique(arr[:, 0]).astype(np.int64).tolist(),)).fetchall()
+                    (comb.track.tolist(),)).fetchall()
                     if matching.song_key(r[1], r[2]) in keys]
             exclude = np.array(excluded)
-            cand = (arr[:, 0].astype(np.int64), arr[:, 1], arr[:, 2], arr[:, 3])
-            alpha = body.alpha if body.adventure is None else alpha_for(
-                body.adventure, *cand, exclude, body.n)
-            res = score(*cand, alpha, exclude, body.n)
+            alpha = body.alpha if body.adventure is None else rk.alpha_for(
+                body.adventure, comb, exclude, body.n)
+            res = rk.penalise(comb, alpha, exclude, body.n)
+            why = rk.reasons(active, comb, res, len(seed_ids))
+            mpd = comb.data.get("cooccurrence_mpd", {})
+            zeros = np.zeros(len(comb.track), dtype=np.int64)
+            hits, co = mpd.get("seed_hits", zeros)[res.rows], mpd.get("co_count", zeros)[res.rows]
             meta = {r[0]: r[1:] for r in conn.execute(
                 """SELECT track_id, track_uri, name, artist, album, playlist_count
                    FROM tracks WHERE track_id = ANY(%s)""",
@@ -285,9 +289,9 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None) -> Fast
             Recommendation(
                 track_uri=meta[t][0], name=meta[t][1], artist=meta[t][2], album=meta[t][3],
                 playlist_count=meta[t][4], score=float(s), seed_hits=int(h), co_count=int(c),
-                reason=reason(int(h), len(seed_ids), int(c)),
+                reason=w,
             )
-            for t, s, h, c in zip(res.track.tolist(), res.score, res.seed_hits, res.co_count)
+            for t, s, h, c, w in zip(res.track.tolist(), res.score, hits, co, why)
         ]
         return RecommendOut(results=results, seeds=seeds, unknown_seeds=unknown, alpha=alpha)
 

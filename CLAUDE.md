@@ -26,6 +26,7 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
 - **Recommender v1** = item-item co-occurrence. `sim` is cosine `c_ij / sqrt(n_i·n_j)` or PMI (whichever evaluates better, recorded in `eval/results.csv`).
   Score for seed set S: `Σ_{s∈S} sim(s, t) / playlist_count(t)^alpha`, seeds excluded. The familiar↔adventurous slider (`adventure` 0..1) does **not** map to a fixed alpha: `recommend.alpha_for` binary-searches alpha ∈ [0, 2] so the top-n's median popularity moves that fraction of the way (log scale) from alpha 0 to alpha 2 for *this* seed set. A fixed mapping felt dead for popular seeds and collapsed mid-popularity ones (measured on real sessions, 2026-11-01). Replacements reuse the returned `alpha`. Eval still uses raw `alpha`.
   Known limit: popular seeds can't get very adventurous: their top-200 cosine neighbours are themselves popular (pool saturates ~alpha 1.5). Deeper/alternative neighbour lists = recommender v2.
+- **v2 scoring is pluggable** (`scorers.py` + `recommend.py`): a *scorer* turns seeds into candidates with a raw score, its `top` (score = raw/top, normalised 0–1) and reason data; it knows nothing about popularity or exclusions. The *ranker* (`recommend.combine` → `alpha_for` → `penalise`) sums `w_i · score_i` with weights from **`scorers.json`** (repo root, or `$SWAVE_SCORERS`; read once at API startup, so restart the API after editing), divides by `playlist_count^alpha`, drops seeds/excluded. The sum is rescaled so the first scorer keeps its raw values: with one scorer the ranking is bit-for-bit v1 (dividing by `top` merged scores 1 ulp apart into ties and swapped 2/5,000 eval lists). Reason line = the scorers giving ≥ half of the top contribution (max 2), joined by ` · `. Scorers: `cooccurrence_mpd` (the v1 index). `make eval SCORERS=path.json` logs the weights in the `scorers` column.
 - **Held-out eval set** (`eval_holdout`, made by ingest): 1,000 playlists with ≥ 10 tracks, chosen by `md5(pid)` order. They are excluded from the training matrix and `neighbours`, so eval never leaks.
 - **Eval doesn't need the index**: it computes neighbours for its ~5k seed tracks on the fly with the same `cooc.neighbours()` function (same top-k truncation) as build-index, so comparing methods/k/alpha takes minutes, not hours. The training matrix is cached in `data/cache/` (deleted by ingest).
 
@@ -37,7 +38,8 @@ api/                 Python package + FastAPI app
     config.py        env/.env, paths, DB connection
     cooc.py          playlist×track matrix, top-k neighbours (cosine / PPMI)
     pipeline/        ingest.py, build_index.py, evaluate.py, feedback.py  (CLI entry points)
-    recommend.py     scoring a seed set (shared by API and eval)
+    scorers.py       Scorer interface + co-occurrence scorer (neighbour lookup from DB or memory)
+    recommend.py     ranker: weighted sum of scorers, popularity penalty, slider alpha, reasons
     deezer.py        preview lookup + cache
     spotify.py       PKCE OAuth + playlist save
     main.py          FastAPI routes: /search /recommend /events /auth/* /save
@@ -63,7 +65,7 @@ Makefile
 docker compose up -d     # Postgres
 make ingest              # dataset → tracks, playlist_tracks (prunes < 5 playlists)
 make build-index         # sparse matrix → neighbours table (METHOD=cosine|pmi)
-make eval                # hit-rate@50, recall@50 on held-out playlists → eval/results.csv
+make eval                # hit-rate@50, recall@50 on held-out playlists → eval/results.csv (SCORERS=cfg.json)
 make dev                 # API on :8000 + web on :3000
 make test                # pytest + web typecheck/lint
 make feedback            # weekly keep rate, most-removed tracks/artists (WEEKS=8); counts once
