@@ -19,4 +19,4 @@ repos:
         name: Block dataset files, derived data and .env files
         language: fail
         entry: "Refusing to commit dataset / derived data / .env files (see CLAUDE.md, Public repo rules)"
-        files: '(^|/)(data|exports|dumps)/|(^|/)\.env($|\.(?!example$))|mpd\.slice\.|\.(npz|npy|parquet|pkl|dump|sql\.gz)$'
+        files: '(^|/)(data|exports|dumps)/|(^|/)\.env($|\.(?!example$))|mpd\.slice\.|listenbrainz-.*\.tar|\.listens$|\.(npz|npy|parquet|pkl|dump|sql\.gz)$'

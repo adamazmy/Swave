@@ -6,10 +6,13 @@ The MPD is a 2018 snapshot, so the same song often has a different Spotify track
   2. same artist + same normalised title  ("Wonderwall - Remastered 2014" == "Wonderwall")
   3. same artist + one title is a prefix of the other covering >= 60% of the longer one
 Among several dataset versions the most popular one wins.
+  4. a ListenBrainz-only track (`lb_tracks`) with the same song key; the playlist's own Spotify
+     URI is then remembered for that song in `lb_spotify`.
 """
 
 from __future__ import annotations
 
+import hashlib
 from typing import NamedTuple
 
 import psycopg
@@ -30,11 +33,18 @@ class Item(NamedTuple):
 class Match(NamedTuple):
     item: Item
     row: Row | None
-    how: str  # "exact" | "title" | "fuzzy" | "none"
+    how: str  # "exact" | "title" | "fuzzy" | "lb" | "none"
 
 
 def song_key(name: str, artist: str) -> tuple[str, str]:
     return norm(name), norm(artist)
+
+
+def song_hash(name: str, artist: str) -> int:
+    """Stable signed 64-bit id of a song = hash of its normalised key (`lb_tracks.song`)."""
+    t, a = song_key(name, artist)
+    return int.from_bytes(hashlib.blake2b(f"{t}\x1f{a}".encode(), digest_size=8).digest(),
+                          "little", signed=True)
 
 
 def _prefix_match(a: str, b: str) -> bool:
@@ -81,4 +91,28 @@ def map_items(conn: psycopg.Connection, items: list[Item]) -> list[Match]:
             if candidates:
                 found = Match(item, max(candidates, key=lambda r: r[4]), "fuzzy")
         out.append(found or Match(item, None, "none"))
-    return out
+    return _match_lb(conn, out)
+
+
+def _match_lb(conn: psycopg.Connection, matches: list[Match]) -> list[Match]:
+    """Unmatched songs → ListenBrainz-only tracks by song key (any of the item's artists)."""
+    todo = {song_hash(m.item.name, a): i for i, m in enumerate(matches) if m.row is None
+            for a in m.item.artists if a}
+    if not todo:
+        return matches
+    rows = conn.execute("SELECT song, name, artist, pop_est FROM lb_tracks WHERE song = ANY(%s)",
+                        (list(todo),)).fetchall()
+    known = []
+    for song, name, artist, pop in rows:
+        i = todo[song]
+        if matches[i].row is None:
+            item = matches[i].item
+            matches[i] = Match(item, (item.uri, name, artist, "", pop), "lb")
+            known.append((song, item.uri))
+    if known:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """INSERT INTO lb_spotify (song, track_uri, checked_at) VALUES (%s, %s, now())
+                   ON CONFLICT (song) DO UPDATE SET track_uri = EXCLUDED.track_uri,
+                   checked_at = now()""", known)
+    return matches

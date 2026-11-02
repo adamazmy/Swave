@@ -6,6 +6,8 @@ A personal playlist builder. Pick 1–5 songs that capture a vibe, get 30–50 r
 
 > **Dataset not included.** Swave is built on the [Spotify Million Playlist Dataset](https://www.aicrowd.com/challenges/spotify-million-playlist-dataset-challenge), which Spotify licenses for **non-commercial research use only** and which may not be redistributed. This repository contains only code. You must download the dataset yourself, and nothing derived from it (database tables, matrices, neighbour lists, exports) is ever committed here.
 
+> **ListenBrainz data.** The second recommender uses listening data from [ListenBrainz](https://listenbrainz.org) (© MetaBrainz Foundation, released under [CC0](https://creativecommons.org/publicdomain/zero/1.0/)) and its MusicBrainz → Spotify id lookup (labs.api.listenbrainz.org). Thanks to MetaBrainz and the ListenBrainz community. `make lb-ingest` reads it straight from the public dump; nothing from it is stored in this repository either.
+
 ## How it works
 
 ```
@@ -13,12 +15,14 @@ web/ (Next.js + Tailwind)  ──▶  api/ (FastAPI)  ──▶  Postgres 16 (do
                                     ├─▶ Deezer API   (30-second previews)
                                     └─▶ Spotify API  (OAuth PKCE, save playlist)
 
-offline:  MPD slices ─▶ make ingest ─▶ make build-index ─▶ make eval
+offline:  MPD slices ─▶ make ingest ─▶ make build-index ─┐
+          ListenBrainz dump ─▶ make lb-ingest ─▶ make lb-build ─┴▶ make eval
 ```
 
 - **Ingest** streams the dataset slices (straight from the zip or from unzipped JSON) into Postgres: `tracks` and `playlist_tracks`. Tracks in fewer than 5 playlists are pruned.
 - **Recommender v1: item-item co-occurrence.** A sparse playlist × track matrix gives, for every pair of tracks, how many playlists contain both. That count is normalised by popularity (cosine, or positive PMI), and the top-200 neighbours of each track are stored in a `neighbours` table so requests are fast.
-- **Scoring** a seed set: `Σ over seeds of sim(seed, track) / playlist_count(track)^alpha`. `alpha` is the familiar ↔ adventurous slider: 0 = no penalty for popular songs.
+- **Recommender v2: pluggable scorers.** Each scorer (MPD playlist co-occurrence, ListenBrainz listening-session co-occurrence) scores candidates 0–1; the ranker adds them with weights from [`scorers.json`](scorers.json), divides by `popularity^alpha` (the familiar ↔ adventurous slider) and explains each pick with its top scorer(s).
+- **ListenBrainz** (`make lb-ingest`, `make lb-build`): the last 3 years of public listens are read column-by-column from the remote dump (HTTP range requests, ~34 GB of the 249 GB), split into listening sessions (new session after 30 min, repeats collapsed, < 3 songs dropped) and turned into a second co-occurrence index. Songs are linked to the MPD tracks by normalised artist + title; the others (mostly post-2017 music) become new tracks, resolved to Spotify only when shown.
 
 > Status: MVP complete (M1–M5): pipeline, evaluation, API, frontend, Spotify save, feedback report. See [PLAN.md](PLAN.md).
 
@@ -68,7 +72,9 @@ Requirements: Docker, Python 3.12, GNU make (Windows: `winget install ezwinports
 | `make db` | Start Postgres (docker compose) |
 | `make ingest` | Dataset → `tracks`, `playlist_tracks` (+ held-out eval set). Full dataset: ~20–40 min |
 | `make build-index` | Top-K neighbours for every track → `neighbours`. Full dataset: ~1–3 h. `METHOD=cosine\|pmi K=200 MIN_CO=2` |
-| `make eval` | Offline evaluation → one line + a row in `eval/results.csv`. `METHOD K MIN_CO ALPHA` |
+| `make lb-ingest` | ListenBrainz listens since `LB_SINCE` (default 2023-11-01) → compact arrays in `data/lb/` (~1 h download, ~37 GB temporary) |
+| `make lb-build` | Sessions, matching, `lb_tracks`, `neighbours_lb`, LB eval hold-out |
+| `make eval` | Offline evaluation → one line + a row in `eval/results.csv`. `METHOD K MIN_CO ALPHA SCORERS=cfg.json HOLDOUT=mpd\|lb` |
 | `make dev` | API + web app together |
 | `make api` / `make web` | Just the API (:8000) / just the web app (:3000) |
 | `make feedback` | Weekly keep rate (kept ÷ shown) and most-removed tracks/artists, printed to the terminal. `WEEKS=8` |
@@ -91,4 +97,4 @@ This repo is public. `.gitignore` blocks `data/`, exports, dumps, matrices and `
 
 ## License
 
-Code: [MIT](LICENSE). The dataset is not included and is licensed separately by Spotify.
+Code: [MIT](LICENSE). The MPD dataset is not included and is licensed separately by Spotify. ListenBrainz data is CC0 (MetaBrainz Foundation).

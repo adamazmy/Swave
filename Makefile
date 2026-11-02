@@ -12,9 +12,13 @@ K ?= 200
 MIN_CO ?= 2
 ALPHA ?= 0
 
-.PHONY: setup db ingest build-index eval api web dev feedback test
+.PHONY: setup db ingest build-index lb-ingest lb-build lb-report eval api web dev feedback test
 
 WEEKS ?= 8
+LB_SINCE ?= 2023-11-01
+HOLDOUT ?= mpd
+LB_MIN_LISTENERS ?= 20
+LB_K ?= 100
 
 setup:              ## venv + deps + pre-commit hooks
 	$(PYTHON) -m venv api/.venv
@@ -32,8 +36,17 @@ ingest: db          ## MPD slices -> tracks, playlist_tracks (prune < 5 playlist
 build-index: db     ## top-K neighbours per track -> neighbours table
 	$(VENV_PY) -m swave.pipeline.build_index --method $(METHOD) --k $(K) --min-co $(MIN_CO)
 
+lb-ingest:          ## ListenBrainz listens since LB_SINCE -> data/lb/ (range-reads the remote dump)
+	$(VENV_PY) -m swave.pipeline.lb_ingest --since $(LB_SINCE)
+
+lb-build: db        ## data/lb/ -> sessions, matching, lb_tracks, neighbours_lb, lb_holdout
+	$(VENV_PY) -m swave.pipeline.lb_build --min-listeners $(LB_MIN_LISTENERS) --k $(LB_K)
+
+lb-report: db       ## LB match rate + post-2017 share of new tracks (MusicBrainz API sample, ~17 min)
+	$(VENV_PY) -m swave.pipeline.lb_report
+
 eval: db            ## hit-rate@50 / recall@50 on held-out playlists -> eval/results.csv
-	$(VENV_PY) -m swave.pipeline.evaluate --method $(METHOD) --k $(K) --min-co $(MIN_CO) --alpha $(ALPHA) $(if $(SCORERS),--scorers $(SCORERS))
+	$(VENV_PY) -m swave.pipeline.evaluate --method $(METHOD) --k $(K) --min-co $(MIN_CO) --alpha $(ALPHA) $(if $(SCORERS),--scorers $(SCORERS)) --holdout $(HOLDOUT)
 
 api: db             ## FastAPI on http://127.0.0.1:8000 (docs at /docs), auto-reload
 	$(VENV_PY) -m uvicorn swave.main:create_app --factory --reload --reload-dir api/swave --host 127.0.0.1 --port 8000

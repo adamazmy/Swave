@@ -269,3 +269,17 @@ def playlist_items(conn: psycopg.Connection, http: httpx.Client, playlist_id: st
 def playlist_track_uris(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
                         cap: int = 500) -> list[str]:
     return [i["uri"] for i in playlist_items(conn, http, playlist_id, cap)]
+
+
+def search_track(conn: psycopg.Connection, http: httpx.Client, title: str, artist: str) -> str | None:
+    """Spotify URI of `artist – title` via search (limit 10, dev-mode max), checked with the same
+    artist/title rules as Deezer matching; None if no candidate passes."""
+    from swave.deezer import pick  # local import: deezer doesn't depend on spotify
+
+    r = call(conn, http, "GET", "/search",
+             params={"q": f"{artist} {title}", "type": "track", "limit": 10}).json()
+    items = r.get("tracks", {}).get("items", [])
+    cands = [{"title": t["name"], "artist": {"name": a["name"]}, "uri": t["uri"]}
+             for t in items for a in t.get("artists", [])[:3]]
+    hit = pick(cands, artist, title)
+    return hit["uri"] if hit else None

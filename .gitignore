@@ -2,6 +2,8 @@
 data/
 spotify_million_playlist_dataset.zip
 mpd.slice.*.json
+listenbrainz-*.tar*
+*.listens
 *.parquet
 *.npz
 *.npy

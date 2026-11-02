@@ -1,0 +1,6 @@
+{
+  "weights": {
+    "cooccurrence_mpd": 0.75,
+    "cooccurrence_lb": 0.25
+  }
+}

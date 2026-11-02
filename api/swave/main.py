@@ -17,11 +17,12 @@ from fastapi.responses import RedirectResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, StringConstraints
 
-from swave import deezer, matching, recommend as rk, scorers, spotify
+from swave import deezer, lb, matching, recommend as rk, resolve, scorers, spotify
 from swave.config import database_url
 from swave.recommend import MAX_ALPHA
 
 TRACK_URI = r"^spotify:track:[A-Za-z0-9]{22}$"
+RESOLVE_SPARE = 25  # extra ranked rows so dropped (unresolvable) ListenBrainz tracks get replaced
 ACTIONS = ("shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved")
 Action = Literal["shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved"]
 
@@ -182,6 +183,8 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
         with pool.connection() as conn:
             conn.execute(APP_SCHEMA)
             conn.execute(spotify.SCHEMA)
+            conn.execute(lb.SCHEMA)
+            conn.execute(lb.VIEW)
         yield
         pool.close()
         http.close()
@@ -220,79 +223,123 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
 
     @app.get("/search", response_model=list[Track])
     def search(q: str = Query(min_length=2, max_length=100), limit: int = Query(20, ge=1, le=50)):
-        """Every word must appear in title or artist; most popular first."""
+        """Every word must appear in title or artist; most popular first. Includes ListenBrainz-only
+        tracks (resolved to Spotify on the fly; unresolvable ones are left out)."""
         words = q.lower().split()[:6]
         if not words:
             raise HTTPException(422, "Query is empty")
-        where = " AND ".join(["lower(name || ' ' || artist) LIKE %s"] * len(words))
+        like = [f"%{escape_like(w)}%" for w in words]
+
+        def cond(t: str) -> str:
+            return " AND ".join([f"lower({t}.name || ' ' || {t}.artist) LIKE %s"] * len(words))
+
         with pool.connection() as conn:
             rows = conn.execute(
-                f"""SELECT track_uri, name, artist, album, playlist_count FROM tracks
-                    WHERE {where} ORDER BY playlist_count DESC, track_uri LIMIT %s""",
-                [f"%{escape_like(w)}%" for w in words] + [limit],
+                f"""SELECT track_id, track_uri, name, artist, album, pc FROM (
+                      (SELECT t.track_id, t.track_uri, t.name, t.artist, t.album,
+                              t.playlist_count AS pc FROM tracks t WHERE {cond("t")}
+                       ORDER BY t.playlist_count DESC LIMIT %s)
+                      UNION ALL
+                      (SELECT l.track_id, s.track_uri, l.name, l.artist, '', l.pop_est
+                       FROM lb_tracks l LEFT JOIN lb_spotify s USING (song)
+                       WHERE {cond("l")} AND (s.track_uri IS NOT NULL OR s.checked_at IS NULL
+                                              OR s.checked_at < now() - interval '30 days')
+                       ORDER BY l.pop_est DESC LIMIT %s)) x
+                    ORDER BY pc DESC, track_id LIMIT %s""",
+                like + [limit] + like + [limit] + [limit],
             ).fetchall()
-        return [Track(track_uri=r[0], name=r[1], artist=r[2], album=r[3], playlist_count=r[4])
-                for r in rows]
+            uris = resolve.resolve(conn, http, [r[0] for r in rows if r[1] is None])
+        out, seen = [], set()
+        for tid, uri, name, artist, album, pc in rows:
+            uri = uri or uris.get(tid)
+            if uri and uri not in seen:
+                seen.add(uri)
+                out.append(Track(track_uri=uri, name=name, artist=artist, album=album,
+                                 playlist_count=pc))
+        return out
+
+    def scorer_set(conn) -> list[tuple[scorers.Scorer, float]]:  # noqa: ANN001
+        tables = {"cooccurrence_mpd": ("neighbours", "shared playlists"),
+                  "cooccurrence_lb": ("neighbours_lb", "listening sessions")}
+        return [(scorers.Cooccurrence(name, scorers.from_db(conn, tables[name][0]),
+                                      unit=tables[name][1]), w) for name, w in weights.items()]
 
     @app.post("/recommend", response_model=RecommendOut)
     def recommend(body: RecommendIn):
         with pool.connection() as conn:
-            ids = dict(conn.execute(
-                "SELECT track_uri, track_id FROM tracks WHERE track_uri = ANY(%s)",
-                (list(set(body.seeds) | set(body.exclude)),),
-            ).fetchall())
-            seed_ids = sorted({ids[u] for u in body.seeds if u in ids})
+            # uri -> track ids, MPD first (a resolved ListenBrainz track may share its Spotify URI
+            # with an MPD track)
+            ids: dict[str, list[int]] = {}
+            for u, t in conn.execute(
+                    "SELECT track_uri, track_id FROM all_tracks WHERE track_uri = ANY(%s) "
+                    "ORDER BY track_id", (list(set(body.seeds) | set(body.exclude)),)).fetchall():
+                ids.setdefault(u, []).append(t)
+            seed_ids = sorted({ids[u][0] for u in body.seeds if u in ids})
             unknown = [u for u in body.seeds if u not in ids]
             if not seed_ids:
                 raise HTTPException(404, "None of the seed tracks are in the index")
-            active = [(scorers.Cooccurrence("cooccurrence_mpd", scorers.from_db(conn)), w)
-                      for name, w in weights.items() if name == "cooccurrence_mpd"]
+            active = scorer_set(conn)
 
             def pop_of(tids: np.ndarray) -> np.ndarray:
+                tl = tids.astype(np.int64).tolist()
                 pc = dict(conn.execute(
-                    "SELECT track_id, playlist_count FROM tracks WHERE track_id = ANY(%s)",
-                    (tids.astype(np.int64).tolist(),)).fetchall())
+                    """SELECT track_id, playlist_count FROM tracks WHERE track_id = ANY(%s)
+                       UNION ALL SELECT track_id, pop_est FROM lb_tracks WHERE track_id = ANY(%s)""",
+                    (tl, tl)).fetchall())
                 return np.array([pc.get(int(t), 0) for t in tids], dtype=np.float64)
 
             comb = rk.combine(active, np.array(seed_ids), body.adventure, pop_of)
-            excluded = seed_ids + [ids[u] for u in body.exclude if u in ids]
+            excluded = [t for u in set(body.seeds) | set(body.exclude) for t in ids.get(u, [])]
             if body.exclude_songs and len(comb.track):
                 keys = {matching.song_key(r[0], r[1]) for r in conn.execute(
-                    "SELECT name, artist FROM tracks WHERE track_uri = ANY(%s)",
+                    "SELECT name, artist FROM all_tracks WHERE track_uri = ANY(%s)",
                     (body.exclude_songs,)).fetchall()}
+                tl = comb.track.tolist()
                 excluded += [r[0] for r in conn.execute(
-                    "SELECT track_id, name, artist FROM tracks WHERE track_id = ANY(%s)",
-                    (comb.track.tolist(),)).fetchall()
+                    """SELECT track_id, name, artist FROM tracks WHERE track_id = ANY(%s)
+                       UNION ALL SELECT track_id, name, artist FROM lb_tracks
+                       WHERE track_id = ANY(%s)""", (tl, tl)).fetchall()
                     if matching.song_key(r[1], r[2]) in keys]
             exclude = np.array(excluded)
             alpha = body.alpha if body.adventure is None else rk.alpha_for(
                 body.adventure, comb, exclude, body.n)
-            res = rk.penalise(comb, alpha, exclude, body.n)
+            # A few spare rows: ListenBrainz-only tracks without a Spotify match are dropped.
+            res = rk.penalise(comb, alpha, exclude, body.n + RESOLVE_SPARE)
             why = rk.reasons(active, comb, res, len(seed_ids))
             mpd = comb.data.get("cooccurrence_mpd", {})
             zeros = np.zeros(len(comb.track), dtype=np.int64)
             hits, co = mpd.get("seed_hits", zeros)[res.rows], mpd.get("co_count", zeros)[res.rows]
+            tl = res.track.tolist() + seed_ids
             meta = {r[0]: r[1:] for r in conn.execute(
-                """SELECT track_id, track_uri, name, artist, album, playlist_count
-                   FROM tracks WHERE track_id = ANY(%s)""",
-                (res.track.tolist() + seed_ids,),
-            ).fetchall()}
+                """SELECT track_id, track_uri, name, artist, album, playlist_count FROM tracks
+                   WHERE track_id = ANY(%s)""", (tl,)).fetchall()}
+            lb_ids = [t for t in tl if t not in meta]
+            if lb_ids:
+                uris = resolve.resolve(conn, http, lb_ids)
+                for r in conn.execute("SELECT track_id, name, artist, pop_est FROM lb_tracks "
+                                      "WHERE track_id = ANY(%s)", (lb_ids,)).fetchall():
+                    if r[0] in uris:
+                        meta[r[0]] = (uris[r[0]], r[1], r[2], "", r[3])
         seen: set[str] = set()
         seeds = []
         for u in body.seeds:
-            if u in ids and u not in seen:
+            if u in ids and u not in seen and ids[u][0] in meta:
                 seen.add(u)
-                m = meta[ids[u]]
-                seeds.append(Track(track_uri=m[0], name=m[1], artist=m[2], album=m[3],
+                m = meta[ids[u][0]]
+                seeds.append(Track(track_uri=u, name=m[1], artist=m[2], album=m[3],
                                    playlist_count=m[4]))
-        results = [
-            Recommendation(
+        taken = set(body.seeds) | set(body.exclude)
+        results = []
+        for t, s, h, c, w in zip(res.track.tolist(), res.score, hits, co, why):
+            if t not in meta or meta[t][0] in taken:
+                continue  # no Spotify match, or the same Spotify track as a seed/earlier result
+            taken.add(meta[t][0])
+            results.append(Recommendation(
                 track_uri=meta[t][0], name=meta[t][1], artist=meta[t][2], album=meta[t][3],
                 playlist_count=meta[t][4], score=float(s), seed_hits=int(h), co_count=int(c),
-                reason=w,
-            )
-            for t, s, h, c, w in zip(res.track.tolist(), res.score, hits, co, why)
-        ]
+                reason=w))
+            if len(results) == body.n:
+                break
         return RecommendOut(results=results, seeds=seeds, unknown_seeds=unknown, alpha=alpha)
 
     insert_event = """INSERT INTO events (session_id, action, track_uri, position, slider)

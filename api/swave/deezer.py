@@ -83,7 +83,7 @@ def get_preview(conn: psycopg.Connection, client: httpx.Client, track_uri: str) 
             return None
 
     meta = conn.execute(
-        "SELECT name, artist FROM tracks WHERE track_uri = %s", (track_uri,)
+        "SELECT name, artist FROM all_tracks WHERE track_uri = %s LIMIT 1", (track_uri,)
     ).fetchone()
     if not meta:
         raise LookupError(track_uri)

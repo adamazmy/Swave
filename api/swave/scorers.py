@@ -66,12 +66,17 @@ class Cooccurrence:
         return f"appears with {seeds} in {co:,} {self.unit}"
 
 
-def from_db(conn) -> NeighbourLookup:  # noqa: ANN001 (psycopg connection)
-    """Neighbour lists from the `neighbours` table (the API's path)."""
+TABLES = ("neighbours", "neighbours_lb")
+
+
+def from_db(conn, table: str = "neighbours") -> NeighbourLookup:  # noqa: ANN001 (psycopg conn)
+    """Neighbour lists from a neighbours table (the API's path)."""
+    if table not in TABLES:
+        raise ValueError(table)
 
     def lookup(seeds: np.ndarray):
         rows = conn.execute(
-            "SELECT track_id, neighbour_id, sim, co_count FROM neighbours WHERE track_id = ANY(%s)",
+            f"SELECT track_id, neighbour_id, sim, co_count FROM {table} WHERE track_id = ANY(%s)",
             (seeds.astype(np.int64).tolist(),),
         ).fetchall()
         a = np.array(rows, dtype=np.float64).reshape(-1, 4)
@@ -96,4 +101,4 @@ def from_dict(nb: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]]) -> Neigh
     return lookup
 
 
-NAMES = ("cooccurrence_mpd",)
+NAMES = ("cooccurrence_mpd", "cooccurrence_lb")
