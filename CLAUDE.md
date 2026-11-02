@@ -89,7 +89,7 @@ make feedback            # weekly keep rate, most-removed tracks/artists (WEEKS=
 
 - Keep it simple: plain functions and SQL. No ORM, no repository layers, no abstractions for features we don't have.
 - Python: type hints, `psycopg` 3, bulk loads via `COPY`, scipy.sparse for matrices. Config from env vars only (`os.environ`), loaded from `.env`.
-- TypeScript strict; Tailwind; dark mode by default; no state library unless one is really needed.
+- TypeScript strict; Tailwind; no state library unless one is really needed. Light + dark themes: colours are CSS variables behind the Tailwind tokens (`app/globals.css`, `[data-theme="light"]` swaps them); `data-theme` is set before paint from localStorage `swave-theme`, else the system setting. Use the tokens (bg-ink, text-muted…), never raw hex or white/zinc classes.
 - API errors: proper HTTP status + `{"detail": "..."}`. Validate inputs with Pydantic.
 - Every algorithm change → `make eval` → a new row in `eval/results.csv`, committed with the change.
 - Milestone loop: run tests + eval → commit → 5-line summary (works / doesn't / eval number) → wait for go-ahead.

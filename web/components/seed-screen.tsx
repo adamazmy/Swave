@@ -207,7 +207,7 @@ export default function SeedScreen() {
                 <span className="max-w-48 truncate font-semibold" title={`${s.name} · ${s.artist}`}>{s.name}</span>
                 <button
                   onClick={() => setSeeds(seeds.filter((x) => x.track_uri !== s.track_uri))}
-                  className="rounded p-1 text-muted hover:bg-white/5 hover:text-text"
+                  className="rounded p-1 text-muted hover:bg-raised hover:text-text"
                   aria-label={`Remove ${s.name}`}
                 >
                   <XIcon className="h-3 w-3" />

@@ -58,3 +58,16 @@ export const Bars = ({ playing = false, className = base }: P & { playing?: bool
     <span className="h-[75%] w-[3px] rounded-[1px] bg-current" />
   </span>
 );
+
+export const SunIcon = ({ className = base }: P) => (
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true">
+    <circle cx="10" cy="10" r="3.5" />
+    <path d="M10 1.5v2.2M10 16.3v2.2M1.5 10h2.2M16.3 10h2.2M4 4l1.6 1.6M14.4 14.4 16 16M4 16l1.6-1.6M14.4 5.6 16 4" strokeLinecap="round" />
+  </svg>
+);
+
+export const MoonIcon = ({ className = base }: P) => (
+  <svg viewBox="0 0 20 20" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M15.8 12.6A7 7 0 0 1 7.4 4.2a.6.6 0 0 0-.8-.7 7.5 7.5 0 1 0 9.9 9.9.6.6 0 0 0-.7-.8Z" />
+  </svg>
+);

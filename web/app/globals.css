@@ -1,27 +1,70 @@
 @import "tailwindcss";
 
 /* v3 "night" theme: deep wine background, salmon-pink and cream accents, wide display type,
-   LED-style mono labels. Colours are Tailwind tokens (bg-ink, text-pink, border-line, …). */
+   LED-style mono labels. Colours are Tailwind tokens (bg-ink, text-pink, border-line, …) that
+   point at CSS variables, so light mode only swaps the variables.
+   - ink: page background (also the text colour ON pink/cream buttons)
+   - cream: the strong accent (Build the set, Kept); in light mode it turns deep wine */
 @theme inline {
   --font-sans: var(--font-archivo);
   --font-mono: var(--font-space-mono);
 
-  --color-ink: #1a0911;
-  --color-panel: #230d17;
-  --color-raised: #2e1120;
-  --color-line: #47192e;
-  --color-wine: #5b1832;
-  --color-plum: #8c2146;
-  --color-pink: #ff8a9b;
-  --color-pink-soft: #ffb3be;
-  --color-cream: #f2cf9d;
-  --color-text: #f7e8ec;
-  --color-muted: #c597a6;
-  --color-dim: #8b5c6d;
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-wine: var(--wine);
+  --color-plum: var(--plum);
+  --color-pink: var(--pink);
+  --color-pink-soft: var(--pink-soft);
+  --color-cream: var(--cream);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
 }
 
+/* Dark (default) */
 :root {
   color-scheme: dark;
+  --ink: #1a0911;
+  --panel: #230d17;
+  --raised: #2e1120;
+  --line: #47192e;
+  --wine: #5b1832;
+  --plum: #8c2146;
+  --pink: #ff8a9b;
+  --pink-soft: #ffb3be;
+  --cream: #f2cf9d;
+  --text: #f7e8ec;
+  --muted: #c597a6;
+  --dim: #8b5c6d;
+  --glow: rgb(255 138 155 / 0.55);
+  --rule: #6e5a63;
+  /* theme toggle shows the icon of the theme you would switch TO */
+  --show-dark: none;
+  --show-light: block;
+}
+
+/* Light: "morning after". Blush paper, wine ink, coral accent. data-theme is set before paint by
+   the script in app/layout.tsx (saved choice, else the system setting). */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ink: #fbf1ef;
+  --panel: #fffaf8;
+  --raised: #f7e6e6;
+  --line: #ecd2d6;
+  --wine: #f6dbe0;
+  --plum: #e7a3b2;
+  --pink: #c8385a;
+  --pink-soft: #de6680;
+  --cream: #5e1a33;
+  --text: #2a0e19;
+  --muted: #74475a;
+  --dim: #9e7584;
+  --glow: transparent;
+  --rule: #c9b3ba;
+  --show-dark: block;
+  --show-light: none;
 }
 
 body {
@@ -62,7 +105,7 @@ body {
 /* Thin double rule along the very top of the page. */
 .top-rule {
   height: 6px;
-  background: repeating-linear-gradient(to bottom, #6e5a63 0 1px, transparent 1px 3px);
+  background: repeating-linear-gradient(to bottom, var(--rule) 0 1px, transparent 1px 3px);
   opacity: 0.6;
 }
 
@@ -73,7 +116,7 @@ body {
   animation: ticker 28s linear infinite;
 }
 .ticker-glow {
-  text-shadow: 0 0 6px rgb(255 138 155 / 0.55);
+  text-shadow: 0 0 6px var(--glow);
 }
 @keyframes ticker {
   to {
@@ -180,3 +223,12 @@ input[type="checkbox"] {
 * {
   scrollbar-color: var(--color-wine) transparent;
 }
+
+/* Theme toggle: show the icon of the theme you would switch to. */
+.when-dark-show {
+  display: var(--show-light);
+}
+.when-light-show {
+  display: var(--show-dark);
+}
+

@@ -274,7 +274,7 @@ export default function ResultsScreen() {
             <button
               onClick={() => removeSeed(s.track_uri)}
               disabled={seeds.length <= 1}
-              className="rounded p-1 text-muted hover:bg-white/5 hover:text-text disabled:invisible"
+              className="rounded p-1 text-muted hover:bg-raised hover:text-text disabled:invisible"
               aria-label={`Remove seed ${s.name}`}
             >
               <XIcon className="h-3 w-3" />

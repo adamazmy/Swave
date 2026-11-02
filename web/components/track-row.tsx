@@ -67,7 +67,7 @@ export default function TrackRow(p: Props) {
         <button
           onClick={p.onRemove}
           disabled={p.pending}
-          className={`rounded-md p-2 text-muted hover:bg-white/5 hover:text-text disabled:opacity-30 ${focus}`}
+          className={`rounded-md p-2 text-muted hover:bg-raised hover:text-text disabled:opacity-30 ${focus}`}
           aria-label={`Remove ${t.name}`}
           title="Remove (replace with the next best)"
         >
