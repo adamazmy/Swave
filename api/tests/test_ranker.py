@@ -127,4 +127,4 @@ def test_load_weights(tmp_path):
 
 
 def test_repo_config_is_valid():
-    assert rk.load_weights(rk.weights_path()) == {"cooccurrence_mpd": 1.0}
+    assert rk.load_weights(rk.weights_path()) == {"cooccurrence_mpd": 0.5, "cooccurrence_lb": 0.5}

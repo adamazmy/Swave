@@ -185,3 +185,4 @@ Eval (5 seeds, @50, alpha 0; 1,000 MPD playlists / 1,000 recent LB sessions held
 Findings:
 - **Recommendation: 0.75 MPD / 0.25 LB.** MPD recall stays at 0.196 (hit-rate −0.8 pt), while recall on recent listening triples (0.072 → 0.230). 0.5 / 0.5 gains a little more on LB (0.263) but costs 2 pts of MPD recall. `scorers.json` stays MPD-only until the owner approves.
 - **Caveat**: listening sessions are often album or artist runs. LB-only, "Mr. Brightside" gives 15 / 40 songs by The Killers (MPD-only: 5 / 40), and an "Espresso" seed gives almost only Sabrina Carpenter. This also flatters the LB hold-out (hidden songs are often from the same album). An artist-diversity cap in the ranker is the obvious next step.
+- **Owner decision (2026-11-02): default weights 0.5 MPD / 0.5 LB** (`scorers.json`): more recent music (LB recall 0.263) at a 2-point cost in MPD recall (0.176). Temporary `data/lb/` (31 GB) kept for quick rebuilds.
