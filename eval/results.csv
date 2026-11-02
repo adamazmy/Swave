@@ -14,3 +14,4 @@ date,git,method,k,min_co,alpha,n_eval,seeds,at,hit_rate,recall,seconds,scorers
 2026-11-01 21:40,34c1f55,cosine,200,2,0.0,1000,5,50,0.9080,0.1960,39,cooccurrence_mpd=1
 2026-11-01 21:44,ea6872b,cosine,200,2,0.0,1000,5,50,0.9080,0.1960,39,cooccurrence_mpd=1
 2026-11-01 22:05,94a7bd7,cosine,200,2,0.0,1000,5,50,0.9080,0.1960,42,cooccurrence_mpd=1
+2026-11-02 10:39,ef993cf,cosine,200,2,0.0,1000,5,50,0.9080,0.1960,40,cooccurrence_mpd=1
