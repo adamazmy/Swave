@@ -123,3 +123,39 @@ v1 is tagged `v1` (370d069). Out of scope for now: personalisation, Spotify play
 - Eval takes `--scorers` (`make eval SCORERS=…`), logs weights in a new `scorers` column (earlier rows back-filled `cooccurrence_mpd=1`).
 - **Proof of no change**: (1) 121 captured v1 `/recommend` requests (1–5 seeds, n 1–100, raw alpha + slider 0/0.35/0.7/1, exclude, exclude_songs, unknown seed) replayed: 5,752 rows, 0 differences in order, score (bit-for-bit), alpha, reason, counts. (2) v1 `score()` vs ranker on all 1,000 eval seed sets × alpha {0, 0.1, 0.5, 1, 2}: 0/5,000 lists differ; slider alpha 0/2,000 differ. (3) `make eval`: 0.9080 / 0.1960 (alpha 0), 0.8810 / 0.1852 (alpha 0.1), same as v1.
 - Found on the way: normalising by the top score merged 1-ulp-apart scores into ties (2/5,000 lists swapped neighbours). Fixed by ranking on the sum rescaled to the first scorer's raw units.
+
+## V2-M2 plan: ListenBrainz scorer (awaiting owner approval, nothing large downloaded yet)
+
+### What's available (measured 2026-11-02)
+
+- Latest full export `listenbrainz-dump-2723-20261015-000002-full` on data.metabrainz.org (CC0, `COPYING` checked). Two listen formats: JSON `.tar.zst` (241 GB, compressed → must be read end to end) and **Spark `.tar` (249 GB, uncompressed)**: 1,512 Parquet files of ~180 MB / ~2.2M listens each, in time order (`0.parquet` = 2002-10 … `1511.parquet` = 2026-10-14). The server supports HTTP range requests, so single files, and single **columns** inside them, can be read without downloading the dump.
+- Parquet columns: `user_id, listened_at, artist_name, recording_name, recording_mbid` (what we need, **38% of the bytes**) + msid, release, credit ids, `created` (not needed).
+- Volume: ~1.4M listens/day now, ~1.0M/day in 2024.
+
+| Window | Files | Full size | Bytes we read | Listens |
+|---|---|---|---|---|
+| 2 years (2024-11 → 2026-10) | ~400 | 67 GB | **~26 GB** | ~0.84 B |
+| 3 years (2023-11 → 2026-10) | ~525 | 90 GB | **~34 GB** | ~1.10 B |
+
+Download speed measured ~13 MB/s → 3 years ≈ 45–60 min.
+
+- **Match sample** (one row group, 1.05M listens, 23.7k users, 2026-10-12/13), exact normalised artist + title (`matching.song_key`) against the 594k MPD tracks: 77% of listens carry a `recording_mbid`; 19.5% of listens, 15.7% of distinct songs, **47.5% of songs with ≥ 5 listeners** match an MPD track. Expect ~45–55% of the LB vocabulary to match (more with the existing loose title-prefix rule), the rest are new tracks (mostly post-2017).
+- **MBID → Spotify id**: `POST labs.api.listenbrainz.org/spotify-id-from-mbid/json` works (batch, no auth, verified). Spotify search (limit 10) only as fallback.
+
+### Approach
+
+1. **`make lb-ingest`** (`pipeline/lb_ingest.py`): for each Parquet file in the window, range-read only the 5 columns, one row group at a time (~30 MB), nothing raw kept. Per listen keep `(user_id int32, ts int32, song int64)` where `song` = 64-bit hash of `song_key(title, artist)` (so MBID variants and remasters collapse, same as playlist import). Written to `data/lb/listens/` split into 64 buckets by user (~18 GB total, temporary). Per file, the distinct `(song, artist, title, mbid)` rows go to `data/lb/names/` (~10 GB, temporary). Resumable per file.
+2. **Sessions** (`pipeline/lb_sessions.py`): per bucket, sort by (user, ts); new session after a 30-min gap; collapse repeats of a song within a session; drop sessions < 3 songs; split sessions > 200 songs into chunks of 200 (bounds the pair count). Count distinct listeners per song (buckets have disjoint users, so counts just add).
+3. **Vocabulary**: songs with ≥ 10 distinct listeners (MPD used ≥ 5 playlists; LB users ≈ playlists of one person). I'll report the size before building; if it's above ~1.5M songs I stop and ask.
+4. **Matching** to `tracks`: exact `song_key` → same artist + title prefix ≥ 60% (the `matching.py` rules); most popular MPD version wins. Unmatched songs become **new tracks** in a new table `lb_tracks(track_id, name, artist, recording_mbid, listeners, pop_est, track_uri NULL, resolved_at)` with `track_id`s continuing after MPD's (594,421+), so scorers and ranker share one id space. `tracks` is not altered. `pop_est` = LB listener count mapped to the `playlist_count` scale (fit on matched songs), so the slider's popularity penalty works for new tracks.
+5. **Index `cooccurrence_lb`**: session × track matrix → same `cooc.neighbours()` (cosine, top-k, min_co 2) → table `neighbours_lb`. k = 200 like MPD, or 100 if the vocabulary is large (≈ 100–200M rows, 5–10 GB). Scorer = `scorers.Cooccurrence("cooccurrence_lb", …, unit="listening sessions")`.
+6. **Lazy Spotify resolution**: when an `lb_tracks` row is about to be shown or saved and has no `track_uri`: labs `spotify-id-from-mbid` (batched), else Spotify search (artist + title, `deezer.pick`-style check). Result (or miss) cached in `lb_tracks`; unresolvable tracks are skipped in results. Search on the Seed screen also includes `lb_tracks` (so post-2017 songs can be seeds), resolved the same way.
+7. **Eval**: (a) the MPD holdout as now; (b) **new LB holdout**: 1,000 sessions from the last month (≥ 10 in-vocabulary songs, chosen by hash), excluded from the LB matrix; 5 seeds, hit-rate@50 / recall@50 on the rest. Runs: MPD-only, LB-only, and LB/MPD weightings 0.25 / 0.5 / 0.75, on both holdouts → table here + rows in `eval/results.csv` (new `holdout` column). I recommend weights; `scorers.json` stays MPD-only until you approve.
+8. **Reports**: match rate (exact / loose / new), number of new tracks, and **how many are post-2017**: estimated from a random 1,000 new tracks via the MusicBrainz API (`first-release-date`, 1 req/s ≈ 17 min).
+9. **Repo hygiene**: everything under `data/lb/` (already gitignored via `data/`); add `listenbrainz-*.tar*` / `*.listens` patterns to `.gitignore` and the pre-commit block; README gets "ListenBrainz data © MetaBrainz Foundation, CC0". Tests on synthetic listens only (sessionising, dedupe, gap rule, matching, lazy resolution with mocked HTTP).
+
+### Cost
+
+- Disk: ~30 GB temporary in `data/lb/` (deleted after the build), +5–10 GB in Postgres. 91 GB free now.
+- Time: download ~1 h, sessions + matrix + index ~1 h.
+- New external services: data.metabrainz.org (download), labs.api.listenbrainz.org (lazy MBID → Spotify), musicbrainz.org API (one-off release-year sample).
