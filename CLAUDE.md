@@ -11,7 +11,8 @@ web/ (Next.js App Router + Tailwind)  ──HTTP──▶  api/ (FastAPI, Python
                                                      ├─▶ Deezer public API   (30s previews, cached in DB)
                                                      └─▶ Spotify Web API     (OAuth PKCE, create playlist + add items)
 
-Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ build-index ─▶ eval
+Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ build-index ─┐
+                                          ListenBrainz dump ─▶ lb-ingest ─▶ lb-build ─┴▶ eval
 ```
 
 - **Postgres is the only store.** Tables:
@@ -23,10 +24,15 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
   - `events(id, ts, action, track_uri, position, slider, session_id)`: actions: shown, seeded, previewed, kept, removed, more_like_this, saved (`shown` = keep-rate denominator)
   - `previews(track_uri PK, deezer_id, matched, checked_at)`: Deezer match cache (misses cached too)
   - `spotify_auth(id=1, refresh_token, expires_at)`: single row, owner's token
+  - `lb_tracks(track_id, song, name, artist, recording_mbid, listeners, pop_est)`: ListenBrainz songs NOT in the MPD; `track_id`s continue after MPD's (594,421+), `song` = `matching.song_hash` of the normalised title+artist; `pop_est` = listeners mapped onto the playlist_count scale
+  - `neighbours_lb(track_id, neighbour_id, sim, co_count)`: top-100 per track from listening sessions (ids = MPD or lb_tracks); `lb_holdout(sess, pos, track_id)`, `lb_meta(built_at, git, stats)`
+  - `lb_spotify(song PK, track_uri NULL, checked_at)`: app-owned cache of resolved Spotify URIs for LB songs (misses cached, retried after 30 days), survives `lb-build`
+  - view `all_tracks` = `tracks` ∪ resolved `lb_tracks` (album ''): use it for anything keyed by `track_uri`. `lb-build` drops lb_tracks with CASCADE and recreates the view (`lb.VIEW`); the API also creates the LB tables/view at startup (`lb.SCHEMA`)
 - **Recommender v1** = item-item co-occurrence. `sim` is cosine `c_ij / sqrt(n_i·n_j)` or PMI (whichever evaluates better, recorded in `eval/results.csv`).
   Score for seed set S: `Σ_{s∈S} sim(s, t) / playlist_count(t)^alpha`, seeds excluded. The familiar↔adventurous slider (`adventure` 0..1) does **not** map to a fixed alpha: `recommend.alpha_for` binary-searches alpha ∈ [0, 2] so the top-n's median popularity moves that fraction of the way (log scale) from alpha 0 to alpha 2 for *this* seed set. A fixed mapping felt dead for popular seeds and collapsed mid-popularity ones (measured on real sessions, 2026-11-01). Replacements reuse the returned `alpha`. Eval still uses raw `alpha`.
   Known limit: popular seeds can't get very adventurous: their top-200 cosine neighbours are themselves popular (pool saturates ~alpha 1.5). Deeper/alternative neighbour lists = recommender v2.
 - **v2 scoring is pluggable** (`scorers.py` + `recommend.py`): a *scorer* turns seeds into candidates with a raw score, its `top` (score = raw/top, normalised 0–1) and reason data; it knows nothing about popularity or exclusions. The *ranker* (`recommend.combine` → `alpha_for` → `penalise`) sums `w_i · score_i` with weights from **`scorers.json`** (repo root, or `$SWAVE_SCORERS`; read once at API startup, so restart the API after editing), divides by `playlist_count^alpha`, drops seeds/excluded. The sum is rescaled so the first scorer keeps its raw values: with one scorer the ranking is bit-for-bit v1 (dividing by `top` merged scores 1 ulp apart into ties and swapped 2/5,000 eval lists). Reason line = the scorers giving ≥ half of the top contribution (max 2), joined by ` · `. Scorers: `cooccurrence_mpd` (the v1 index). `make eval SCORERS=path.json` logs the weights in the `scorers` column.
+- **ListenBrainz scorer** (`cooccurrence_lb`, reason "N listening sessions"): `make lb-ingest` range-reads 5 columns of the remote Spark dump (an uncompressed .tar of time-ordered Parquet files; `lb.walk_back` lists it from the end) for listens since `LB_SINCE`, per listen (user, ts, song hash) in 64 user buckets under `data/lb/`. `make lb-build`: sessions (30-min gap, repeats collapsed, < 3 songs dropped, > 200 cut), vocabulary ≥ 20 listeners (1.5 M songs; ≥ 10 = 2.7 M was too big), match to MPD (exact song key, then title prefix ≥ 60%), cosine top-100. RAM: the session matrix is capped at 200 M entries (`--max-nnz`, hash sample of whole sessions: 39% of 32.9 M); the first uncapped build was killed by memory pressure. LB-only tracks have no Spotify id: `resolve.py` resolves them when shown (labs `spotify-id-from-mbid`, batched, then Spotify search ≤ 10/request) and `/recommend` ranks `RESOLVE_SPARE` extra rows to replace unresolvable ones. Playlist import matches LB-only songs too and stores the playlist's own URI in `lb_spotify`. Sessions are often album/artist runs, so LB alone over-recommends the seed's artist.
 - **Held-out eval set** (`eval_holdout`, made by ingest): 1,000 playlists with ≥ 10 tracks, chosen by `md5(pid)` order. They are excluded from the training matrix and `neighbours`, so eval never leaks.
 - **Eval doesn't need the index**: it computes neighbours for its ~5k seed tracks on the fly with the same `cooc.neighbours()` function (same top-k truncation) as build-index, so comparing methods/k/alpha takes minutes, not hours. The training matrix is cached in `data/cache/` (deleted by ingest).
 
@@ -37,8 +43,11 @@ api/                 Python package + FastAPI app
   swave/
     config.py        env/.env, paths, DB connection
     cooc.py          playlist×track matrix, top-k neighbours (cosine / PPMI)
-    pipeline/        ingest.py, build_index.py, evaluate.py, feedback.py  (CLI entry points)
+    pipeline/        ingest.py, build_index.py, evaluate.py, feedback.py,
+                     lb_ingest.py, lb_build.py, lb_report.py  (CLI entry points)
     scorers.py       Scorer interface + co-occurrence scorer (neighbour lookup from DB or memory)
+    lb.py            ListenBrainz: remote tar/Parquet range reads, sessions, LB tables + all_tracks view
+    resolve.py       lazy Spotify URIs for ListenBrainz-only tracks (labs lookup, Spotify search)
     recommend.py     ranker: weighted sum of scorers, popularity penalty, slider alpha, reasons
     deezer.py        preview lookup + cache
     spotify.py       PKCE OAuth + playlist save
@@ -65,7 +74,11 @@ Makefile
 docker compose up -d     # Postgres
 make ingest              # dataset → tracks, playlist_tracks (prunes < 5 playlists)
 make build-index         # sparse matrix → neighbours table (METHOD=cosine|pmi)
-make eval                # hit-rate@50, recall@50 on held-out playlists → eval/results.csv (SCORERS=cfg.json)
+make lb-ingest           # ListenBrainz listens since LB_SINCE → data/lb/ (~2 h, ~31 GB)
+make lb-build            # sessions, matching, lb_tracks, neighbours_lb, lb_holdout (~20 min from cache)
+make lb-report           # match rate + post-2017 share of new tracks (MusicBrainz API, 1 req/s)
+make eval                # hit-rate@50, recall@50 → eval/results.csv (SCORERS=cfg.json HOLDOUT=mpd|lb);
+                         # evaluate.py takes several --scorers configs (eval/scorers/*.json)
 make dev                 # API on :8000 + web on :3000
 make test                # pytest + web typecheck/lint
 make feedback            # weekly keep rate, most-removed tracks/artists (WEEKS=8); counts once
@@ -107,6 +120,8 @@ Deezer's advanced syntax (`q=artist:"…" track:"…"`) returns **0 results** as
 ## Data licence
 
 The **Spotify Million Playlist Dataset** (from AIcrowd) is licensed for **non-commercial research use only and may not be redistributed**. The raw files and **anything derived from them** (DB tables, matrices, neighbour lists, dumps, exported playlists, track-level samples) must never leave this machine via git.
+
+**ListenBrainz** data is **CC0** (MetaBrainz Foundation; attribution in the README). It is still kept out of git like the MPD data: dump files, `data/lb/` and everything derived stay local (the derived tables also contain MPD-linked ids).
 
 ## Public repo rules (strict)
 

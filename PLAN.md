@@ -159,3 +159,29 @@ Download speed measured ~13 MB/s → 3 years ≈ 45–60 min.
 - Disk: ~30 GB temporary in `data/lb/` (deleted after the build), +5–10 GB in Postgres. 91 GB free now.
 - Time: download ~1 h, sessions + matrix + index ~1 h.
 - New external services: data.metabrainz.org (download), labs.api.listenbrainz.org (lazy MBID → Spotify), musicbrainz.org API (one-off release-year sample).
+
+## V2-M2 result (2026-11-02)
+
+Data and build:
+- `make lb-ingest`: 551 Parquet files (2023-11-01 → 2026-10-15), **1.08 B listens**, 32.4 M distinct songs, 112 min (3 workers, ~34 GB read of the 249 GB dump), 31 GB in `data/lb/`.
+- `make lb-build` (20 min from cache):
+  - Vocabulary: owner chose **≥ 20 listeners, top-100**; ≥ 10 would give 2.74 M songs, too big. Result: 1,495,212 songs, 74,604 users, 32.9 M sessions (519 M song-in-session entries).
+  - **RAM**: the first build was killed by memory pressure. It is now capped at 200 M matrix entries, i.e. a hash sample of **39% of sessions**, collected per bucket.
+  - `neighbours_lb`: 115.7 M rows.
+- **Match rate**: 219,569 exact + 2,183 loose = **14.8% of LB songs** (= **33.9% weighted by listeners**). The MPD only has 594 k tracks, so most of the long tail can't match. **1,273,460 new tracks** in `lb_tracks`. `make lb-report`: release year from MusicBrainz for a random 1,000 (972 known): **58% ± 3% first released 2018+ → ≈ 739 k post-2017 tracks**. By year: 2018: 49, 2019: 54, 2020: 35, 2021: 70, 2022: 52, 2023: 90, 2024: 94, 2025: 78, 2026: 42, ≤ 2017: 408. The other ~42% are older songs the MPD never had (non-English, niche, or catalogue missing in 2017).
+- `pop_est` for new tracks: log(playlist_count) = 0.77 + 0.59·log(listeners). Known issue: big post-2017 hits look only moderately popular (Blinding Lights ≈ 520, MPD top ≈ 45 k), because LB has only 75 k users. Quantile mapping would be better (follow-up).
+- Lazy resolution works on the live API: "Blinding Lights" / "Espresso" are found by seed search and resolved through the labs lookup in ~2 s the first time, then cached.
+
+Eval (5 seeds, @50, alpha 0; 1,000 MPD playlists / 1,000 recent LB sessions held out of `neighbours_lb`):
+
+| Scorer weights (MPD / LB) | MPD hit-rate | MPD recall | LB hit-rate | LB recall |
+|---|---|---|---|---|
+| 1 / 0 (current default) | **0.908** | 0.196 | 0.255 | 0.072 |
+| 0 / 1 | 0.675 | 0.082 | 0.655 | 0.276 |
+| 0.75 / 0.25 | 0.900 | **0.196** | 0.587 | 0.230 |
+| 0.5 / 0.5 | 0.884 | 0.176 | 0.642 | 0.263 |
+| 0.25 / 0.75 | 0.817 | 0.124 | 0.651 | 0.276 |
+
+Findings:
+- **Recommendation: 0.75 MPD / 0.25 LB.** MPD recall stays at 0.196 (hit-rate −0.8 pt), while recall on recent listening triples (0.072 → 0.230). 0.5 / 0.5 gains a little more on LB (0.263) but costs 2 pts of MPD recall. `scorers.json` stays MPD-only until the owner approves.
+- **Caveat**: listening sessions are often album or artist runs. LB-only, "Mr. Brightside" gives 15 / 40 songs by The Killers (MPD-only: 5 / 40), and an "Espresso" seed gives almost only Sabrina Carpenter. This also flatters the LB hold-out (hidden songs are often from the same album). An artist-diversity cap in the ranker is the obvious next step.
