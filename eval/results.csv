@@ -25,3 +25,5 @@ date,git,method,k,min_co,alpha,n_eval,seeds,at,hit_rate,recall,seconds,scorers,h
 2026-11-02 15:30,0bdcf89,cosine,200,2,0.0,1000,5,50,0.5870,0.2298,12,cooccurrence_lb=0.25 cooccurrence_mpd=0.75,lb
 2026-11-02 15:30,0bdcf89,cosine,200,2,0.0,1000,5,50,0.6420,0.2627,13,cooccurrence_lb=0.5 cooccurrence_mpd=0.5,lb
 2026-11-02 15:30,0bdcf89,cosine,200,2,0.0,1000,5,50,0.6510,0.2757,12,cooccurrence_lb=0.75 cooccurrence_mpd=0.25,lb
+2026-11-02 15:57,1088f70,cosine,200,2,0.0,1000,5,50,0.8840,0.1755,41,cooccurrence_lb=0.5 cooccurrence_mpd=0.5,mpd
+2026-11-02 15:57,1088f70,cosine,200,2,0.0,1000,5,50,0.6420,0.2627,11,cooccurrence_lb=0.5 cooccurrence_mpd=0.5,lb
