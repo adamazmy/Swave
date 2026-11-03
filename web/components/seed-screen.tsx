@@ -169,7 +169,7 @@ export default function SeedScreen() {
             <span className="text-pink">night.</span>
           </h1>
           <p className="max-w-xs text-sm leading-relaxed text-muted">
-            Feed it a few tracks. Swave finds what people play next to them and cuts you a set.
+            Choose a track. Swave does the rest.
           </p>
         </div>
         <Mosaic className="mx-auto hidden w-full max-w-xs sm:grid" />
