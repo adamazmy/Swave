@@ -22,7 +22,10 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
   - `neighbours(track_id, neighbour_id, sim, co_count)`: top-200 per track, precomputed (ints keep this ~130M-row table small)
   - `index_meta(method, k, min_co, built_at, git)`: how `neighbours` was built
   - `events(id, ts, action, track_uri, position, slider, session_id)`: actions: shown, seeded, previewed, kept, removed, more_like_this, saved (`shown` = keep-rate denominator)
-  - `previews(track_uri PK, deezer_id, matched, checked_at)`: Deezer match cache (misses cached too)
+  - `previews(track_uri PK, deezer_id, matched, checked_at)`: v1–v3 Deezer match cache, no longer read (its matches were copied into `preview_sources`)
+  - `preview_sources(track_uri, source, provider_id, has_preview, checked_at)`: v4 preview cache, one row per track and source (deezer, itunes); provider ids only, NULL id = no match (retried after 30 days)
+  - `track_meta(track_uri PK, isrc, duration_ms, checked_at)`: from Spotify `GET /tracks/{id}` (one call per track; the batch endpoint is 403 in dev mode), for ISRC lookup and the ±3 s duration check
+  - `preview_attempts(id, ts, session_id, track_uri, outcome, source, steps)`: one row per play click with its final outcome (ok, no_match, matched_no_preview, expired_url, playback_error, source_error), logged by the browser
   - `spotify_auth(id=1, refresh_token, expires_at)`: single row, owner's token
   - `lb_tracks(track_id, song, name, artist, recording_mbid, listeners, pop_est)`: ListenBrainz songs NOT in the MPD; `track_id`s continue after MPD's (594,421+), `song` = `matching.song_hash` of the normalised title+artist; `pop_est` = listeners mapped onto the playlist_count scale
   - `neighbours_lb(track_id, neighbour_id, sim, co_count)`: top-100 per track from listening sessions (ids = MPD or lb_tracks); `lb_holdout(sess, pos, track_id)`, `lb_meta(built_at, git, stats)`
@@ -44,12 +47,15 @@ api/                 Python package + FastAPI app
     config.py        env/.env, paths, DB connection
     cooc.py          playlist×track matrix, top-k neighbours (cosine / PPMI)
     pipeline/        ingest.py, build_index.py, evaluate.py, feedback.py,
-                     lb_ingest.py, lb_build.py, lb_report.py  (CLI entry points)
+                     lb_ingest.py, lb_build.py, lb_report.py,
+                     preview_report.py, preview_bench.py  (CLI entry points)
     scorers.py       Scorer interface + co-occurrence scorer (neighbour lookup from DB or memory)
     lb.py            ListenBrainz: remote tar/Parquet range reads, sessions, LB tables + all_tracks view
     resolve.py       lazy Spotify URIs for ListenBrainz-only tracks (labs lookup, Spotify search)
     recommend.py     ranker: weighted sum of scorers, popularity penalty, slider alpha, reasons
-    deezer.py        preview lookup + cache
+    previews.py      preview resolver chain (Deezer ISRC → Deezer search → iTunes), cache, attempt log
+    deezer.py        Deezer API (search, ISRC, fresh preview URL); norm/pick also key playlist + LB matching
+    itunes.py        iTunes Search API + process-wide rate-limit queue (20/min)
     spotify.py       PKCE OAuth + playlist save
     main.py          FastAPI routes: /search /recommend /events /auth/* /save
   tests/             pytest, synthetic fixtures only
@@ -81,6 +87,8 @@ make eval                # hit-rate@50, recall@50 → eval/results.csv (SCORERS=
                          # evaluate.py takes several --scorers configs (eval/scorers/*.json)
 make dev                 # API on :8000 + web on :3000
 make test                # pytest + web typecheck/lint
+make preview-report      # preview coverage % + outcome breakdown, last DAYS=7 days
+make preview-bench       # old vs new preview resolver on SAMPLE=300 shown tracks (live APIs)
 make feedback            # weekly keep rate, most-removed tracks/artists (WEEKS=8); counts once
                          # per (session, track), kept = kept OR more_like_this
 ```
@@ -113,9 +121,10 @@ localStorage (this browser only): `swave-seed-draft` (Seed screen), `swave-resul
 - Code: `api/swave/spotify.py`. Tokens: `spotify_auth` (one row, local DB only, never logged). OAuth `state` → verifier is kept in memory (10 min), so restarting the API mid-login means logging in again.
 - MPD `track_uri`s are real Spotify URIs, so they go straight into `/items`.
 
-## Deezer previews
+## Previews (v4: `previews.py`)
 
-Deezer's advanced syntax (`q=artist:"…" track:"…"`) returns **0 results** as of 2026-11, so search plain `q="<artist> <title>"` and pick the candidate ourselves (`deezer.pick`: same artist; exact title > title without (Live)/remaster suffix > prefix match; otherwise no match) → cache `deezer_id`. Deezer preview URLs are **signed and expire**, so cache the id and fetch a fresh URL from `/track/{id}` on demand. Misses are cached (`matched=false`) and re-tried after 30 days. Never block results on Deezer.
+Chain per track, first source with a preview wins: **Deezer by ISRC** (`/track/isrc:…`, ISRC from Spotify; if that version has no preview, e.g. region-locked, search for another version first) → **Deezer search** (advanced syntax first, it still returns 0 in 2026-11, then plain `"<artist> <title>"`) → **iTunes Search API** (unauthenticated, ~20 calls/min per IP, 403 or dropped TLS when exceeded: every call goes through `itunes.limiter`, a process-wide queue). Matching (`previews.choose`) uses its own loose normaliser (accents folded, feat./brackets/" - version" stripped, primary artist only) — **never change `deezer.norm`**, it keys `matching.song_hash`. Duration within ±3 s when known; fuzzy title (≥ 0.8) only with a matching duration; an ISRC hit is trusted on title alone (artist credits differ: soundtrack vs singer).
+Only provider ids are cached; a fresh URL is fetched at every play (Deezer URLs carry `hdnea=exp=<unix>` and expire). The browser (`use-preview.ts`) retries a failed URL once, then calls `/preview?exclude=<source>` to fall back, and logs one `preview_attempts` row per click. `/previews/resolve` pre-resolves the top 20 results in the background (all 40 with "Previewable only"). No preview → the play button becomes an "Open in Spotify" link; iTunes previews show an "Apple Music ↗" link (Apple's terms). Measured 2026-11-03 on 300 shown tracks: old 88.3% → new 96.7% (`make preview-bench`). Never block results on previews.
 
 ## Data licence
 

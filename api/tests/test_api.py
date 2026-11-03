@@ -172,31 +172,7 @@ def test_events_validation(client):
     assert client.post("/events", json={"action": "kept", "track_uri": "nope"}).status_code == 422
 
 
-def test_preview_caches_match_then_fetches_fresh_url(client, monkeypatch):
-    calls = []
-    monkeypatch.setattr(deezer, "search", lambda c, a, t: calls.append(("search", a, t)) or (42, "https://p/1"))
-    monkeypatch.setattr(deezer, "track_preview", lambda c, i: calls.append(("track", i)) or "https://p/2")
-    first = client.get("/preview", params={"track_uri": uri(2)}).json()
-    second = client.get("/preview", params={"track_uri": uri(2)}).json()
-    assert first["preview_url"] == "https://p/1" and second["preview_url"] == "https://p/2"
-    assert calls == [("search", "Mock Orchestra", "Static Bloom"), ("track", 42)]
-
-
-def test_preview_miss_is_cached(client, monkeypatch):
-    calls = []
-    monkeypatch.setattr(deezer, "search", lambda c, a, t: calls.append(1) or None)
-    assert client.get("/preview", params={"track_uri": uri(4)}).json()["preview_url"] is None
-    assert client.get("/preview", params={"track_uri": uri(4)}).json()["preview_url"] is None
-    assert calls == [1]
-
-
-def test_preview_transient_error_not_cached(client, monkeypatch):
-    def boom(*_):
-        raise deezer.DeezerError("quota")
-    monkeypatch.setattr(deezer, "search", boom)
-    assert client.get("/preview", params={"track_uri": uri(0)}).json()["preview_url"] is None
-    monkeypatch.setattr(deezer, "search", lambda c, a, t: (7, "https://p/ok"))
-    assert client.get("/preview", params={"track_uri": uri(0)}).json()["preview_url"] == "https://p/ok"
+# Preview resolver tests: test_previews.py
 
 
 def test_preview_unknown_track(client):

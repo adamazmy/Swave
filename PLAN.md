@@ -186,3 +186,24 @@ Findings:
 - **Recommendation: 0.75 MPD / 0.25 LB.** MPD recall stays at 0.196 (hit-rate −0.8 pt), while recall on recent listening triples (0.072 → 0.230). 0.5 / 0.5 gains a little more on LB (0.263) but costs 2 pts of MPD recall. `scorers.json` stays MPD-only until the owner approves.
 - **Caveat**: listening sessions are often album or artist runs. LB-only, "Mr. Brightside" gives 15 / 40 songs by The Killers (MPD-only: 5 / 40), and an "Espresso" seed gives almost only Sabrina Carpenter. This also flatters the LB hold-out (hidden songs are often from the same album). An artist-diversity cap in the ranker is the obvious next step.
 - **Owner decision (2026-11-02): default weights 0.5 MPD / 0.5 LB** (`scorers.json`): more recent music (LB recall 0.263) at a 2-point cost in MPD recall (0.176). Temporary `data/lb/` (31 GB) kept for quick rebuilds.
+
+## V4: preview coverage (branch `v4-previews`, 2026-11-03)
+
+Before: Deezer only, plain search + `deezer.pick`, misses cached 30 days, no logging.
+After: chain Deezer ISRC → Deezer search (loose names, ±3 s) → iTunes (queued); provider ids
+cached, fresh URL per play; browser retries once then falls back to the next source; every click
+logged (`preview_attempts`, `make preview-report`); top 20 pre-resolved in the background;
+"Open in Spotify" when there's no preview; optional "Previewable only" filter (off by default).
+
+Coverage, same 300 tracks the app had shown (last 30 days, md5 order), live APIs, `make preview-bench`:
+
+| Resolver | Has a preview | Breakdown |
+|---|---|---|
+| old (v1–v3) | 265/300 = **88.3%** | Deezer 265, none 35 |
+| new (v4) | 290/300 = **96.7%** | Deezer 288, iTunes 2, none 10 |
+
+What did it: ISRC lookup + "ISRC version has no preview → search another version", accent/feat.
+folding, fuzzy titles with a duration check. iTunes adds little (US store, same catalogue gaps).
+Live coverage from real clicks starts now: `make preview-report` (0 attempts at merge time).
+The old cache (`previews`, 77% of 258 tried tracks matched) only reflected tracks clicked.
+

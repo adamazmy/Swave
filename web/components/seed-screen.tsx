@@ -19,7 +19,7 @@ import {
 import { usePreview } from "@/lib/use-preview";
 import { PlusIcon, Spinner, XIcon } from "./icons";
 import { Mosaic, Ticker } from "./night";
-import { PreviewButton } from "./track-row";
+import { PreviewSlot } from "./track-row";
 
 export default function SeedScreen() {
   const router = useRouter();
@@ -379,7 +379,8 @@ function PickList({
     <ul className={`overflow-hidden rounded-md border border-line bg-panel/60 ${scroll ? "max-h-80 overflow-y-auto" : ""}`}>
       {tracks.map((t) => (
         <li key={t.track_uri} className="flex items-center gap-1 border-b border-line/60 pl-3 last:border-b-0">
-          <PreviewButton name={t.name} state={preview.state(t.track_uri)} onClick={() => void preview.toggle(t.track_uri)} />
+          <PreviewSlot uri={t.track_uri} name={t.name} state={preview.state(t.track_uri)}
+                       onClick={() => void preview.toggle(t.track_uri)} />
           <button
             onClick={() => onPick(t)}
             disabled={disabled || isSeed(t)}

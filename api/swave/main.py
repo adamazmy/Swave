@@ -17,7 +17,7 @@ from fastapi.responses import RedirectResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, StringConstraints
 
-from swave import deezer, lb, matching, recommend as rk, resolve, scorers, spotify
+from swave import lb, matching, previews, recommend as rk, resolve, scorers, spotify
 from swave.config import database_url
 from swave.recommend import MAX_ALPHA
 
@@ -97,6 +97,26 @@ class EventIn(BaseModel):
 class PreviewOut(BaseModel):
     track_uri: str
     preview_url: str | None
+    source: str | None = None  # deezer | itunes
+    outcome: str  # ok | no_match | matched_no_preview | source_error
+    open_url: str | None = None  # the track's page at `source` (Apple asks for the link back)
+
+
+PreviewSource = Literal["deezer", "itunes"]
+
+
+class PreviewResolveIn(BaseModel):
+    track_uris: list[Annotated[str, StringConstraints(pattern=TRACK_URI)]] = Field(
+        min_length=1, max_length=previews.PREFETCH_MAX)
+
+
+class PreviewAttemptIn(BaseModel):
+    track_uri: Annotated[str, StringConstraints(pattern=TRACK_URI)]
+    outcome: Literal["ok", "no_match", "matched_no_preview", "expired_url", "playback_error",
+                     "source_error"]
+    source: PreviewSource | None = None
+    steps: str | None = Field(default=None, max_length=300)
+    session_id: str | None = Field(default=None, max_length=64)
 
 
 TrackUri = Annotated[str, StringConstraints(pattern=TRACK_URI)]
@@ -185,6 +205,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             conn.execute(spotify.SCHEMA)
             conn.execute(lb.SCHEMA)
             conn.execute(lb.VIEW)
+            conn.execute(previews.SCHEMA)
         yield
         pool.close()
         http.close()
@@ -361,15 +382,29 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
         return {"logged": len(evs)}
 
     @app.get("/preview", response_model=PreviewOut)
-    def preview(track_uri: str = Query(pattern=TRACK_URI)):
+    def preview(track_uri: str = Query(pattern=TRACK_URI),
+                exclude: Annotated[list[PreviewSource], Query()] = []):  # noqa: B006
+        """A fresh preview URL (fetched now: provider URLs expire). `exclude` = sources whose URL
+        failed to play in the browser, to fall back to the next source."""
         with pool.connection() as conn:
             try:
-                url = deezer.get_preview(conn, http, track_uri)
+                r = previews.get(conn, http, track_uri, tuple(exclude))
             except LookupError:
                 raise HTTPException(404, "Unknown track") from None
-            except deezer.DeezerError:
-                url = None  # transient: show no preview, try again next time
-        return PreviewOut(track_uri=track_uri, preview_url=url)
+        return PreviewOut(track_uri=track_uri, preview_url=r.preview_url, source=r.source,
+                          outcome=r.outcome, open_url=previews.open_url(r.source, r.provider_id))
+
+    @app.post("/previews/resolve")
+    def previews_resolve(body: PreviewResolveIn) -> dict:
+        """Pre-resolve (cache provider ids, no URLs) and report which tracks have a preview:
+        {uri: {status: yes|no|unknown, source, open_url}}. Called in the background by the UI."""
+        return previews.prefetch(pool, http, body.track_uris)
+
+    @app.post("/preview/attempts", status_code=201)
+    def preview_attempt(a: PreviewAttemptIn) -> dict:
+        with pool.connection() as conn:
+            previews.log_attempt(conn, a.session_id, a.track_uri, a.outcome, a.source, a.steps)
+        return {"logged": 1}
 
     # ── Spotify ──────────────────────────────────────────────────────────────────────────────
 

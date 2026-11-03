@@ -61,6 +61,8 @@ export default function ResultsScreen() {
   // …and "Hide songs already in <name>" (on by default; every version of those songs).
   const [hideSource, setHideSource] = useState(() => restored?.hideSource ?? true);
   const hiddenSongs = hideSource ? (source?.trackUris ?? []) : [];
+  // "Previewable only" (off by default): hide songs known to have no preview anywhere.
+  const [previewOnly, setPreviewOnly] = useState(false);
   // Alpha the API picked for the current list: replacements must use the same one.
   const [alpha, setAlpha] = useState(() => restored?.alpha ?? 0);
   // Playlist this vibe was saved to: the next save updates it instead of making a duplicate.
@@ -93,6 +95,16 @@ export default function ResultsScreen() {
     log([{ action: "previewed", track_uri: uri,
            position: latest.current.list.findIndex((x) => x.track_uri === uri) }]),
   );
+
+  // Pre-resolve previews in the background: the top 20 whenever the list changes (all of it
+  // with "Previewable only"), so play starts fast and songs without one show a link instead.
+  const prefetchPreviews = preview.prefetch;
+  const prefetchKey = list.slice(0, previewOnly ? list.length : 20).map((t) => t.track_uri).join(",");
+  useEffect(() => {
+    if (prefetchKey) void prefetchPreviews(prefetchKey.split(","));
+    // prefetchPreviews changes every render; the key is what matters
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefetchKey]);
 
   /** Re-rank: kept tracks stay on top, fresh recommendations fill the rest. */
   const load = useCallback(
@@ -272,6 +284,7 @@ export default function ResultsScreen() {
   }
 
   const fill = `${Math.round(slider * 100)}%`;
+  const noPreview = list.filter((t) => preview.state(t.track_uri) === "unavailable").length;
   // Entrance order of the songs a mix brought in (top to bottom).
   const newOrder = new Map(list.filter((t) => mixed?.uris.has(t.track_uri)).map((t, k) => [t.track_uri, k]));
 
@@ -370,13 +383,20 @@ export default function ResultsScreen() {
         </div>
       </section>
 
-      {source && (source.trackUris?.length ?? 0) > 0 && (
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        {source && (source.trackUris?.length ?? 0) > 0 && (
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input type="checkbox" checked={hideSource} onChange={(e) => toggleHideSource(e.target.checked)} />
+            Hide songs already in “{source.name}”
+            <span className="text-dim">({source.trackUris?.length})</span>
+          </label>
+        )}
         <label className="flex items-center gap-2 text-sm text-muted">
-          <input type="checkbox" checked={hideSource} onChange={(e) => toggleHideSource(e.target.checked)} />
-          Hide songs already in “{source.name}”
-          <span className="text-dim">({source.trackUris?.length})</span>
+          <input type="checkbox" checked={previewOnly} onChange={(e) => setPreviewOnly(e.target.checked)} />
+          Previewable only
+          {previewOnly && noPreview > 0 && <span className="text-dim">({noPreview} hidden)</span>}
         </label>
-      )}
+      </div>
 
       {notice && (
         <p className="flex items-center justify-between rounded-md border border-line bg-panel px-3 py-2 text-sm text-muted">
@@ -418,7 +438,7 @@ export default function ResultsScreen() {
             }`}
             aria-busy={reranking}
           >
-            {list.map((t, i) => (
+            {list.map((t, i) => previewOnly && preview.state(t.track_uri) === "unavailable" ? null : (
               <TrackRow
                 key={t.track_uri}
                 track={t}
@@ -426,6 +446,7 @@ export default function ResultsScreen() {
                 kept={kept.has(t.track_uri)}
                 pending={pending.has(t.track_uri)}
                 preview={preview.state(t.track_uri)}
+                previewInfo={preview.info(t.track_uri)}
                 canAddSeed={seeds.length < MAX_SEEDS}
                 onPreview={() => void preview.toggle(t.track_uri)}
                 onKeep={() => toggleKeep(t, i)}

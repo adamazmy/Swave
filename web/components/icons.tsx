@@ -73,3 +73,10 @@ export const MoonIcon = ({ className = base }: P) => (
     <path d="M15.8 12.6A7 7 0 0 1 7.4 4.2a.6.6 0 0 0-.8-.7 7.5 7.5 0 1 0 9.9 9.9.6.6 0 0 0-.7-.8Z" />
   </svg>
 );
+
+/** Arrow out of a box: opens elsewhere. */
+export const ExternalIcon = ({ className = base }: P) => (
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.9} className={className} aria-hidden="true">
+    <path d="M11 4h5v5M16 4l-7 7M9 5H5v10h10v-4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);

@@ -1,6 +1,7 @@
 import type { Recommendation } from "@/lib/api";
 import { shortReason } from "@/lib/playlist";
-import { Bars, PauseIcon, PlayIcon, PlusIcon, Spinner, XIcon } from "./icons";
+import type { PreviewInfo } from "@/lib/use-preview";
+import { Bars, ExternalIcon, PauseIcon, PlayIcon, PlusIcon, Spinner, XIcon } from "./icons";
 
 export type PreviewState = "idle" | "loading" | "playing" | "unavailable";
 
@@ -15,6 +16,8 @@ type Props = {
   onKeep: () => void;
   onMore: () => void;
   onRemove: () => void;
+  /** Where the preview comes from (iTunes previews must link back to Apple Music). */
+  previewInfo?: PreviewInfo;
   /** "source": this song is being mixed in as a seed; "new": it just arrived from a mix. */
   mix?: "source" | "new";
   /** Order among the newly arrived songs, to stagger their entrance. */
@@ -37,7 +40,13 @@ export default function TrackRow(p: Props) {
         {String(p.position + 1).padStart(2, "0")}
       </span>
 
-      <PreviewButton name={t.name} state={p.pending ? "loading" : p.preview} disabled={p.pending} onClick={p.onPreview} />
+      <PreviewSlot
+        uri={t.track_uri}
+        name={t.name}
+        state={p.pending ? "loading" : p.preview}
+        disabled={p.pending}
+        onClick={p.onPreview}
+      />
 
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-2 text-sm font-semibold">
@@ -47,6 +56,17 @@ export default function TrackRow(p: Props) {
           )}
         </p>
         <p className="truncate text-xs text-muted">
+          {p.previewInfo?.source === "itunes" && p.previewInfo.open_url && (
+            <a
+              href={p.previewInfo.open_url}
+              target="_blank"
+              rel="noreferrer"
+              className="mr-1.5 rounded-sm border border-line px-1 text-[0.65rem] text-dim hover:text-text"
+              title="Preview provided by Apple Music"
+            >
+              Apple Music ↗
+            </a>
+          )}
           {t.artist}
           {t.reason && <span className="text-dim" title={t.reason}> · {shortReason(t.reason)}</span>}
         </p>
@@ -94,6 +114,34 @@ export default function TrackRow(p: Props) {
         </button>
       </div>
     </li>
+  );
+}
+
+/** Spotify page of a track (always available: every track has a Spotify URI). */
+export function spotifyUrl(uri: string): string {
+  return `https://open.spotify.com/track/${uri.split(":").pop()}`;
+}
+
+/** The preview button, or, for a track with no preview anywhere, a link to open it in Spotify. */
+export function PreviewSlot(p: {
+  uri: string;
+  name: string;
+  state: PreviewState;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  if (p.state !== "unavailable") return <PreviewButton name={p.name} state={p.state} disabled={p.disabled} onClick={p.onClick} />;
+  return (
+    <a
+      href={spotifyUrl(p.uri)}
+      target="_blank"
+      rel="noreferrer"
+      className={`grid h-9 w-9 shrink-0 place-items-center rounded-md border border-dashed border-line text-dim transition hover:border-pink/60 hover:text-pink ${focus}`}
+      aria-label={`No preview for ${p.name}: open it in Spotify`}
+      title="No preview available: open in Spotify"
+    >
+      <ExternalIcon className="h-3.5 w-3.5" />
+    </a>
   );
 }
 

@@ -12,7 +12,7 @@ A personal playlist builder. Pick 1–5 songs that capture a vibe, get 30–50 r
 
 ```
 web/ (Next.js + Tailwind)  ──▶  api/ (FastAPI)  ──▶  Postgres 16 (docker compose)
-                                    ├─▶ Deezer API   (30-second previews)
+                                    ├─▶ Deezer + iTunes APIs (30-second previews)
                                     └─▶ Spotify API  (OAuth PKCE, save playlist)
 
 offline:  MPD slices ─▶ make ingest ─▶ make build-index ─┐
@@ -48,7 +48,9 @@ Every action in the app (shown, seeded, previewed, kept, removed, more like this
 | `GET /search?q=&limit=20` | Tracks whose title/artist contain every word, most popular first |
 | `POST /recommend` `{seeds[1–10], adventure 0–1 \| alpha 0–2, exclude[], n≤100}` | Ranked tracks with `seed_hits`, `co_count` and a one-line `reason`, plus the `alpha` used. `adventure` (the slider) lets the API pick alpha for this seed set. Remove → replace = call again with that `alpha` and shown/removed tracks in `exclude` |
 | `POST /events` `{action, track_uri?, position?, slider?, session_id?}` | Logs shown / seeded / previewed / kept / removed / more_like_this / saved (`shown` = denominator of the keep rate). `POST /events/batch` takes a list |
-| `GET /preview?track_uri=` | 30-second Deezer preview URL (or `null`), match cached in Postgres |
+| `GET /preview?track_uri=&exclude=` | Fresh 30-second preview URL from Deezer or iTunes (or `null` + why); provider ids cached in Postgres, URLs never |
+| `POST /previews/resolve` | Pre-resolve previews for up to 50 tracks; says which have one |
+| `POST /preview/attempts` | Log one preview click and its outcome (`make preview-report`) |
 | `GET /health` | How the neighbour index was built |
 | `GET /auth/login` → `/auth/callback`, `GET /auth/status`, `POST /auth/logout` | Spotify login (Authorization Code + PKCE, no client secret) |
 | `POST /save` `{name, track_uris[≤500], playlist_id?}` | New private playlist (`POST /me/playlists` + `POST /playlists/{id}/items`, batches of 100), or with `playlist_id`: rename + replace its songs (`PUT /playlists/{id}`, `PUT /playlists/{id}/items`) |
@@ -96,5 +98,7 @@ Each run prints one summary line and appends a metrics-only row (date, git short
 This repo is public. `.gitignore` blocks `data/`, exports, dumps, matrices and `.env`, and pre-commit hooks block secrets (detect-secrets), files over 5 MB, and anything under `data/` or `exports/`. Tests use made-up playlists only. Details in [CLAUDE.md](CLAUDE.md).
 
 ## License
+
+Previews: 30-second clips from [Deezer](https://www.deezer.com) and the [iTunes Search API](https://performance-partners.apple.com/search-api) (each iTunes preview links back to Apple Music).
 
 Code: [MIT](LICENSE). The MPD dataset is not included and is licensed separately by Spotify. ListenBrainz data is CC0 (MetaBrainz Foundation).

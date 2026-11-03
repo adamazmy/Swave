@@ -12,9 +12,11 @@ K ?= 200
 MIN_CO ?= 2
 ALPHA ?= 0
 
-.PHONY: setup db ingest build-index lb-ingest lb-build lb-report eval api web dev feedback test
+.PHONY: setup db ingest build-index lb-ingest lb-build lb-report eval api web dev feedback test preview-report preview-bench
 
 WEEKS ?= 8
+DAYS ?= 7
+SAMPLE ?= 300
 LB_SINCE ?= 2023-11-01
 HOLDOUT ?= mpd
 LB_MIN_LISTENERS ?= 20
@@ -59,6 +61,12 @@ dev: db             ## API + web together (Ctrl-C stops both)
 
 feedback: db        ## weekly keep rate + most-removed tracks/artists (terminal only)
 	$(VENV_PY) -m swave.pipeline.feedback --weeks $(WEEKS)
+
+preview-report: db  ## preview coverage % + outcome breakdown, last DAYS days (terminal only)
+	$(VENV_PY) -m swave.pipeline.preview_report --days $(DAYS)
+
+preview-bench: db   ## old vs new preview resolver coverage on SAMPLE shown tracks (live APIs)
+	$(VENV_PY) -m swave.pipeline.preview_bench --sample $(SAMPLE)
 
 test: db            ## API/pipeline tests + web typecheck, lint, unit tests (synthetic data only)
 	$(VENV_PY) -m pytest -q api/tests
