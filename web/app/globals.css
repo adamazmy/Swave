@@ -207,12 +207,92 @@ body {
   }
 }
 
+/* ── "More like this": the song is mixed in like a DJ fading a track up ── */
+/* the rest of the list fades back… */
+.mixing > li:not(.mix-source) {
+  opacity: 0.4;
+  transition: opacity 0.3s;
+}
+/* …while the source row glows with a pulsing pink edge */
+.mix-source {
+  background-color: color-mix(in srgb, var(--color-pink) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-pink);
+  animation: mixglow 1.1s ease-in-out infinite;
+}
+@keyframes mixglow {
+  50% {
+    background-color: color-mix(in srgb, var(--color-pink) 20%, transparent);
+    box-shadow: inset 5px 0 0 var(--color-pink), 0 0 26px -6px color-mix(in srgb, var(--color-pink) 70%, transparent);
+  }
+}
+/* a scan line sweeps down the list */
+.mix-sweep {
+  position: absolute;
+  inset-inline: 0;
+  height: 90px;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--color-pink) 16%, transparent) 70%,
+    color-mix(in srgb, var(--color-pink) 55%, transparent) 98%,
+    transparent
+  );
+  animation: sweep 1.4s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+@keyframes sweep {
+  from {
+    top: -90px;
+  }
+  to {
+    top: 100%;
+  }
+}
+/* songs the mix brought in slide in one after another, with a pink flash */
+.mix-new {
+  animation:
+    mixin 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    newflash 2.6s ease-out both;
+}
+@keyframes mixin {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+}
+@keyframes newflash {
+  0%,
+  25% {
+    background-color: color-mix(in srgb, var(--color-pink) 16%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+/* the new seed chip and the "+N new" line pop in */
+.chip-pop {
+  animation: pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ticker-track,
   .mosaic > span,
   .eq > span,
-  .on-air {
+  .on-air,
+  .mix-source,
+  .mix-new,
+  .chip-pop {
     animation: none;
+  }
+  .mix-sweep {
+    display: none;
   }
   /* Loaders still need to show that something is happening: fade instead of bounce. */
   .loader > span {
@@ -273,4 +353,3 @@ input[type="checkbox"] {
 .when-light-show {
   display: var(--show-dark);
 }
-

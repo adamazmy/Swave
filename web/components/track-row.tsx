@@ -15,6 +15,10 @@ type Props = {
   onKeep: () => void;
   onMore: () => void;
   onRemove: () => void;
+  /** "source": this song is being mixed in as a seed; "new": it just arrived from a mix. */
+  mix?: "source" | "new";
+  /** Order among the newly arrived songs, to stagger their entrance. */
+  mixOrder?: number;
 };
 
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink";
@@ -26,7 +30,8 @@ export default function TrackRow(p: Props) {
     <li
       className={`flex items-center gap-3 border-b border-line/70 px-2 py-2.5 transition sm:px-3 ${
         p.kept ? "bg-wine/45" : "hover:bg-raised/60"
-      } ${p.pending ? "opacity-40" : ""}`}
+      } ${p.pending ? "opacity-40" : ""} ${p.mix === "source" ? "mix-source" : p.mix === "new" ? "mix-new" : ""}`}
+      style={p.mix === "new" ? { animationDelay: `${(p.mixOrder ?? 0) * 70}ms` } : undefined}
     >
       <span className="label hidden w-6 shrink-0 text-pink/70 tabular-nums sm:block">
         {String(p.position + 1).padStart(2, "0")}
@@ -35,7 +40,12 @@ export default function TrackRow(p: Props) {
       <PreviewButton name={t.name} state={p.pending ? "loading" : p.preview} disabled={p.pending} onClick={p.onPreview} />
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold">{t.name}</p>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <span className="truncate">{t.name}</span>
+          {p.mix === "new" && (
+            <span className="label shrink-0 rounded-sm border border-pink/60 px-1 text-[0.6rem] leading-4 text-pink">New</span>
+          )}
+        </p>
         <p className="truncate text-xs text-muted">
           {t.artist}
           {t.reason && <span className="text-dim" title={t.reason}> · {shortReason(t.reason)}</span>}
@@ -50,8 +60,17 @@ export default function TrackRow(p: Props) {
           aria-label={`More like ${t.name}`}
           title={p.canAddSeed ? "More like this (adds it as a seed)" : "Seed limit reached"}
         >
-          <span className="hidden sm:inline">More like this</span>
-          <PlusIcon className="h-3.5 w-3.5 sm:hidden" />
+          {p.mix === "source" ? (
+            <span className="flex items-center gap-1.5 text-pink">
+              <Spinner className="h-3 w-3.5" />
+              <span className="hidden sm:inline">Mixing</span>
+            </span>
+          ) : (
+            <>
+              <span className="hidden sm:inline">More like this</span>
+              <PlusIcon className="h-3.5 w-3.5 sm:hidden" />
+            </>
+          )}
         </button>
         <button
           onClick={p.onKeep}

@@ -48,6 +48,11 @@ export default function ResultsScreen() {
   const [error, setError] = useState<string | null>(null);
   // A re-rank (slider, more like this, seed removed) is in flight: the old list stays, dimmed.
   const [reranking, setReranking] = useState(false);
+  // "More like this": the song being mixed in, then what the mix brought (shown for a few seconds).
+  const [mixing, setMixing] = useState<Recommendation | null>(null);
+  const [mixed, setMixed] = useState<{ seed: string; name: string; uris: Set<string> } | null>(null);
+  const mixedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(mixedTimer.current), []);
   const [name, setName] = useState(() => restored?.name ?? "");
   const [description, setDescription] = useState(() => restored?.description ?? "Built with Swave");
   const [cover, setCover] = useState<string | null>(() => restored?.cover ?? null);
@@ -91,9 +96,11 @@ export default function ResultsScreen() {
 
   /** Re-rank: kept tracks stay on top, fresh recommendations fill the rest. */
   const load = useCallback(
-    async (nextSeeds: string[], nextSlider: number) => {
+    async (nextSeeds: string[], nextSlider: number, mix?: Recommendation) => {
       const id = ++requestId.current;
       setReranking(true);
+      clearTimeout(mixedTimer.current);
+      setMixed(null);
       const { list: cur, kept: k, removed: r, hiddenSongs: hidden } = latest.current;
       const keptTracks = cur.filter((t) => k.has(t.track_uri));
       try {
@@ -120,13 +127,23 @@ export default function ResultsScreen() {
             .filter((e) => !k.has(e.track_uri)),
         );
         router.replace(resultsUrl(nextSeeds, nextSlider), { scroll: false });
+        if (mix) {
+          // Songs the mix brought in: they slide in tagged NEW for a few seconds.
+          const before = new Set(cur.map((t) => t.track_uri));
+          const uris = new Set(merged.filter((t) => !before.has(t.track_uri)).map((t) => t.track_uri));
+          setMixed({ seed: mix.track_uri, name: mix.name, uris });
+          mixedTimer.current = setTimeout(() => setMixed(null), 6000);
+        }
       } catch (err) {
         if (id !== requestId.current) return;
         setError(err instanceof ApiError ? err.message : "Couldn't load recommendations");
         setStatus("error");
       } finally {
         // Only the newest request clears it; a superseded one leaves it to its successor.
-        if (id === requestId.current) setReranking(false);
+        if (id === requestId.current) {
+          setReranking(false);
+          setMixing(null);
+        }
       }
     },
     [log, router, resultsUrl],
@@ -233,7 +250,9 @@ export default function ResultsScreen() {
     setKept(nextKept);
     latest.current.kept = nextKept;
     setSeeds(next);
-    void load(next, slider);
+    if (preview.playing === t.track_uri) preview.stop();
+    setMixing(t);
+    void load(next, slider, t);
   }
 
   function removeSeed(uri: string) {
@@ -253,6 +272,8 @@ export default function ResultsScreen() {
   }
 
   const fill = `${Math.round(slider * 100)}%`;
+  // Entrance order of the songs a mix brought in (top to bottom).
+  const newOrder = new Map(list.filter((t) => mixed?.uris.has(t.track_uri)).map((t, k) => [t.track_uri, k]));
 
   return (
     <div className="space-y-7">
@@ -270,11 +291,20 @@ export default function ResultsScreen() {
         </button>
       </div>
 
-      <Ticker items={seedTracks.map((s) => s.name)} empty="Now loaded ▸ tuning in" />
+      {mixing ? (
+        <Ticker key="mixing" lead="Mixing in" items={[mixing.name, mixing.artist]} empty="" />
+      ) : (
+        <Ticker items={seedTracks.map((s) => s.name)} empty="Now loaded ▸ tuning in" />
+      )}
 
       <section aria-label="Seeds" className="flex flex-wrap gap-2">
         {seedTracks.map((s, i) => (
-          <span key={s.track_uri} className="flex items-center gap-2 rounded-md border border-line bg-panel py-1.5 pl-2.5 pr-1 text-xs">
+          <span
+            key={s.track_uri}
+            className={`flex items-center gap-2 rounded-md border py-1.5 pl-2.5 pr-1 text-xs ${
+              mixed?.seed === s.track_uri ? "chip-pop border-pink bg-pink/10" : "border-line bg-panel"
+            }`}
+          >
             <span className="font-mono text-pink">{String(i + 1).padStart(2, "0")}</span>
             <span className="max-w-48 truncate font-semibold" title={`${s.name} · ${s.artist}`}>{s.name}</span>
             <button
@@ -290,14 +320,34 @@ export default function ResultsScreen() {
       </section>
 
       <section className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
-        <div className="flex items-center gap-4">
-          <h1 className="font-display text-xl tracking-[0.18em]">The set</h1>
-          {reranking && status === "ready" && (
+        <div className="flex min-w-0 items-center gap-4">
+          <h1 className="shrink-0 font-display text-xl tracking-[0.18em]">The set</h1>
+          {mixing && status === "ready" ? (
+            <span role="status" className="label flex min-w-0 max-w-64 items-center gap-2 text-pink sm:max-w-72">
+              <Spinner className="h-3.5 w-4 shrink-0" />
+              <span className="truncate">Mixing in “{mixing.name}”</span>
+            </span>
+          ) : reranking && status === "ready" ? (
             <span role="status" className="label dots flex items-center gap-2 text-pink">
               <Spinner className="h-3.5 w-4" />
               Re-cutting
             </span>
-          )}
+          ) : mixed ? (
+            <span role="status" className="chip-pop label flex min-w-0 max-w-64 items-center gap-2 text-cream sm:max-w-72">
+              {mixed.uris.size > 0 ? (
+                // The new songs can be far down the list: jump to the first one.
+                <button
+                  onClick={() => document.querySelector(".mix-new")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                  className="shrink-0 rounded-sm border border-pink/60 px-1.5 py-0.5 text-pink hover:bg-pink/10"
+                >
+                  +{mixed.uris.size} new ↓
+                </button>
+              ) : (
+                <span className="shrink-0 text-pink">Mixed in</span>
+              )}
+              <span className="truncate">like “{mixed.name}”</span>
+            </span>
+          ) : null}
         </div>
         <div className="w-full space-y-2 sm:w-80">
           <label htmlFor="vibe" className="label flex justify-between text-muted">
@@ -359,26 +409,34 @@ export default function ResultsScreen() {
       )}
 
       {status === "ready" && list.length > 0 && (
-        <ol
-          className={`border-t border-line/70 transition-opacity duration-300 ${reranking ? "pointer-events-none opacity-50" : ""}`}
-          aria-busy={reranking}
-        >
-          {list.map((t, i) => (
-            <TrackRow
-              key={t.track_uri}
-              track={t}
-              position={i}
-              kept={kept.has(t.track_uri)}
-              pending={pending.has(t.track_uri)}
-              preview={preview.state(t.track_uri)}
-              canAddSeed={seeds.length < MAX_SEEDS}
-              onPreview={() => void preview.toggle(t.track_uri)}
-              onKeep={() => toggleKeep(t, i)}
-              onMore={() => moreLikeThis(t, i)}
-              onRemove={() => void remove(t, i)}
-            />
-          ))}
-        </ol>
+        // While mixing, a pink scan line sweeps down the list (the wrapper clips it).
+        <div className="relative overflow-hidden">
+          {mixing && <div className="mix-sweep" aria-hidden="true" />}
+          <ol
+            className={`border-t border-line/70 transition-opacity duration-300 ${
+              mixing ? "mixing pointer-events-none" : reranking ? "pointer-events-none opacity-50" : ""
+            }`}
+            aria-busy={reranking}
+          >
+            {list.map((t, i) => (
+              <TrackRow
+                key={t.track_uri}
+                track={t}
+                position={i}
+                kept={kept.has(t.track_uri)}
+                pending={pending.has(t.track_uri)}
+                preview={preview.state(t.track_uri)}
+                canAddSeed={seeds.length < MAX_SEEDS}
+                onPreview={() => void preview.toggle(t.track_uri)}
+                onKeep={() => toggleKeep(t, i)}
+                onMore={() => moreLikeThis(t, i)}
+                onRemove={() => void remove(t, i)}
+                mix={mixing?.track_uri === t.track_uri ? "source" : mixed?.uris.has(t.track_uri) ? "new" : undefined}
+                mixOrder={newOrder.get(t.track_uri)}
+              />
+            ))}
+          </ol>
+        </div>
       )}
 
       {status === "ready" && list.length > 0 && (

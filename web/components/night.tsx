@@ -30,8 +30,8 @@ export function Mosaic({ className = "" }: { className?: string }) {
 }
 
 /** LED-style marquee: "NOW LOADED ▸ song ▸ song …". Static text for screen readers. */
-export function Ticker({ items, empty }: { items: string[]; empty: string }) {
-  const text = items.length ? `Now loaded ▸ ${items.join(" ▸ ")}` : empty;
+export function Ticker({ items, empty, lead = "Now loaded" }: { items: string[]; empty: string; lead?: string }) {
+  const text = items.length ? `${lead} ▸ ${items.join(" ▸ ")}` : empty;
   // Short text is repeated so the strip never runs half empty.
   const loop = Array(Math.max(1, Math.ceil(90 / (text.length + 6)))).fill(text).join("  ···  ");
   // Two copies side by side; the track slides by half its width, so the loop is seamless.
