@@ -52,7 +52,10 @@ def _prefix_match(a: str, b: str) -> bool:
     return bool(short) and long_.startswith(short) and len(short) / len(long_) >= PREFIX_MIN_RATIO
 
 
-def map_items(conn: psycopg.Connection, items: list[Item]) -> list[Match]:
+def map_items(conn: psycopg.Connection, items: list[Item], lb: bool = True) -> list[Match]:
+    """Items → dataset tracks: exact id, then artist + normalised title, then title prefix; then
+    (lb=True) ListenBrainz-only songs, which take the item's own uri (a real Spotify uri). Pasted
+    lines have no uri: they pass lb=False and resolve LB songs themselves (paste.py)."""
     rows = conn.execute(
         "SELECT track_uri, name, artist, album, playlist_count FROM tracks WHERE track_uri = ANY(%s)",
         ([i.uri for i in items],),
@@ -91,7 +94,7 @@ def map_items(conn: psycopg.Connection, items: list[Item]) -> list[Match]:
             if candidates:
                 found = Match(item, max(candidates, key=lambda r: r[4]), "fuzzy")
         out.append(found or Match(item, None, "none"))
-    return _match_lb(conn, out)
+    return _match_lb(conn, out) if lb else out
 
 
 def _match_lb(conn: psycopg.Connection, matches: list[Match]) -> list[Match]:

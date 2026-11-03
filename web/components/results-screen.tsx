@@ -17,9 +17,11 @@ import {
 import { currentSession } from "@/lib/session";
 import { readSource } from "@/lib/source";
 import { clearAll, readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
+import { openTrackUrl, useProvider } from "@/lib/provider";
 import { usePreview } from "@/lib/use-preview";
 import { Spinner, XIcon } from "./icons";
 import { Loading, Ticker } from "./night";
+import ExportPanel from "./export-panel";
 import SavePanel from "./save-panel";
 import TrackRow from "./track-row";
 
@@ -63,6 +65,7 @@ export default function ResultsScreen() {
   const hiddenSongs = hideSource ? (source?.trackUris ?? []) : [];
   // "Previewable only" (off by default): hide songs known to have no preview anywhere.
   const [previewOnly, setPreviewOnly] = useState(false);
+  const provider = useProvider();
   // Alpha the API picked for the current list: replacements must use the same one.
   const [alpha, setAlpha] = useState(() => restored?.alpha ?? 0);
   // Playlist this vibe was saved to: the next save updates it instead of making a duplicate.
@@ -447,6 +450,7 @@ export default function ResultsScreen() {
                 pending={pending.has(t.track_uri)}
                 preview={preview.state(t.track_uri)}
                 previewInfo={preview.info(t.track_uri)}
+                open={{ href: openTrackUrl(provider.name, t.track_uri), label: provider.info.label }}
                 canAddSeed={seeds.length < MAX_SEEDS}
                 onPreview={() => void preview.toggle(t.track_uri)}
                 onKeep={() => toggleKeep(t, i)}
@@ -460,7 +464,7 @@ export default function ResultsScreen() {
         </div>
       )}
 
-      {status === "ready" && list.length > 0 && (
+      {status === "ready" && list.length > 0 && (provider.info.can_write ? (
         <SavePanel
           tracks={list.filter((t) => kept.has(t.track_uri))}
           details={{ name, description, cover }}
@@ -469,7 +473,7 @@ export default function ResultsScreen() {
             if (d.description !== undefined) setDescription(d.description);
             if (d.cover !== undefined) setCover(d.cover);
           }}
-          source={source}
+          source={source?.provider === "paste" ? null : source}
           saved={saved}
           onSaved={(playlist) => {
             if (playlist) setSaved(playlist);
@@ -480,7 +484,14 @@ export default function ResultsScreen() {
             );
           }}
         />
-      )}
+      ) : (
+        <ExportPanel
+          tracks={list.filter((t) => kept.has(t.track_uri))}
+          name={name}
+          onName={setName}
+          provider={provider.info}
+        />
+      ))}
     </div>
   );
 }

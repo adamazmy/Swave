@@ -17,7 +17,7 @@ from fastapi.responses import RedirectResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, StringConstraints
 
-from swave import lb, matching, previews, recommend as rk, resolve, scorers, spotify
+from swave import itunes, lb, matching, paste, previews, providers, recommend as rk, resolve, scorers, spotify
 from swave.config import database_url
 from swave.recommend import MAX_ALPHA
 
@@ -160,6 +160,11 @@ class ImportIn(BaseModel):
 class SourcePlaylist(BaseModel):
     id: str
     name: str
+    provider: Literal["spotify", "paste"] = "spotify"  # "paste": a pasted song list, no playlist
+
+
+class PasteIn(BaseModel):
+    text: str = Field(min_length=3, max_length=40_000)
 
 
 class ImportOut(BaseModel):
@@ -206,6 +211,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             conn.execute(lb.SCHEMA)
             conn.execute(lb.VIEW)
             conn.execute(previews.SCHEMA)
+            conn.execute(providers.SCHEMA)
         yield
         pool.close()
         http.close()
@@ -498,6 +504,11 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
 
     @app.post("/import", response_model=ImportOut)
     def import_playlist(body: ImportIn):
+        if "music.apple.com" in body.url or "itunes.apple.com" in body.url:
+            try:  # capability check: the Apple adapter can't read playlists (no MusicKit)
+                providers.PROVIDERS["apple"].read_playlist(None, http, body.url)
+            except providers.Unsupported as e:
+                raise HTTPException(422, str(e)) from None
         pid = spotify.parse_playlist_id(body.url)
         if not pid:
             raise HTTPException(422, "That doesn't look like a Spotify playlist link")
@@ -526,5 +537,41 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                          total=len(unique), missing=len(unmatched),
                          loose=sum(m.how in ("title", "fuzzy") for m in matches),
                          unmatched=unmatched[:50])
+
+    @app.post("/import/text", response_model=ImportOut)
+    def import_text(body: PasteIn):
+        """Seeds from a pasted song list (one per line; Apple Music copy-paste works)."""
+        with pool.connection() as conn:
+            rows, unmatched, loose = paste.match(conn, http, body.text)
+        tracks = [Track(track_uri=r[0], name=r[1], artist=r[2], album=r[3], playlist_count=r[4])
+                  for r in rows]
+        total = len(paste.lines(body.text))
+        return ImportOut(playlist=SourcePlaylist(id="", name="your pasted list", provider="paste"),
+                         tracks=tracks, total=total, missing=len(unmatched), loose=loose,
+                         unmatched=unmatched[:50])
+
+    # ── Providers (Spotify, Apple Music…) ────────────────────────────────────────────────────
+
+    @app.get("/providers")
+    def list_providers() -> list[dict]:
+        """Music services and what Swave can do with each (search/read/write)."""
+        return providers.describe()
+
+    @app.get("/providers/{name}/open")
+    def open_in(name: str, track_uri: str = Query(pattern=TRACK_URI)):
+        """Redirect to the track on that service, or to a search there when it isn't found."""
+        p = providers.PROVIDERS.get(name)
+        if not p or not p.caps.search:
+            raise HTTPException(404, "Unknown music service")
+        with pool.connection() as conn:
+            meta = conn.execute("SELECT name, artist FROM all_tracks WHERE track_uri = %s LIMIT 1",
+                                (track_uri,)).fetchone()
+            if not meta:
+                raise HTTPException(404, "Unknown track")
+            try:
+                found = p.find(conn, http, track_uri)
+            except itunes.ItunesError:
+                found = None  # rate limited / down: the search page still gets you there
+        return RedirectResponse(found.url if found else p.search_url(meta[0], meta[1]), status_code=302)
 
     return app

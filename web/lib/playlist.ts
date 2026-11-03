@@ -86,9 +86,10 @@ export function formatCount(n: number): string {
   return new Intl.NumberFormat("en", { notation: "compact" }).format(n);
 }
 
-/** True when the Seed box holds a Spotify playlist link (or URI) rather than a search. */
+/** True when the Seed box holds a playlist link (Spotify, or Apple Music: the API then explains
+ *  why it can't read it) rather than a search. */
 export function isPlaylistLink(s: string): boolean {
-  return /open\.spotify\.com\/(?:[\w-]+\/)*playlist\/|^\s*spotify:playlist:/i.test(s);
+  return /open\.spotify\.com\/(?:[\w-]+\/)*playlist\/|^\s*spotify:playlist:|music\.apple\.com\/(?:[\w-]+\/)*playlist\//i.test(s);
 }
 
 /**
@@ -103,4 +104,9 @@ export function shortReason(reason: string): string {
   return parts
     .map((p, i) => (i > 0 && first && lead(p) === first ? p.slice(first.length) : p))
     .join(" · ");
+}
+
+/** Plain "Title - Artist" lines: what playlist-transfer tools (and Swave's own paste box) read. */
+export function toSongList(tracks: { name: string; artist: string }[]): string {
+  return tracks.map((t) => `${t.name} - ${t.artist}`).join("\n");
 }

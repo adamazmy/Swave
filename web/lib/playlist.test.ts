@@ -3,6 +3,7 @@ import {
   addSeed,
   isPlaylistLink,
   shortReason,
+  toSongList,
   mergeKept,
   parseSeeds,
   refreshKept,
@@ -102,6 +103,7 @@ describe("isPlaylistLink", () => {
     expect(isPlaylistLink(" spotify:playlist:abc123")).toBe(true);
     expect(isPlaylistLink("https://open.spotify.com/track/abc123")).toBe(false);
     expect(isPlaylistLink("playlist love songs")).toBe(false);
+    expect(isPlaylistLink("https://music.apple.com/us/playlist/late-night/pl.u-abc123")).toBe(true);
   });
 });
 
@@ -113,5 +115,13 @@ describe("shortReason", () => {
       .toBe("with 2 of your 3 seeds in 9 shared playlists · with 1 of your 3 seeds in 4 listening sessions");
     expect(shortReason("appears with your seed in 7 listening sessions")).toBe("with your seed in 7 listening sessions");
     expect(shortReason("")).toBe("");
+  });
+});
+
+describe("toSongList", () => {
+  it("writes one Title - Artist line per song", () => {
+    expect(toSongList([{ name: "Static Bloom", artist: "Mock Orchestra" }, { name: "Quiet Engine", artist: "Mock Orchestra" }]))
+      .toBe(["Static Bloom - Mock Orchestra", "Quiet Engine - Mock Orchestra"].join("\n"));
+    expect(toSongList([])).toBe("");
   });
 });

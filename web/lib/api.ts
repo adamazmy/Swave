@@ -50,6 +50,25 @@ export class ApiError extends Error {
   }
 }
 
+export type ImportResult = {
+  playlist: { id: string; name: string; provider: "spotify" | "paste" };
+  tracks: Track[];
+  total: number;
+  missing: number;
+  loose: number; // matched by title + artist (Spotify id changed since 2018)
+  unmatched: string[];
+};
+
+export type ProviderName = "spotify" | "apple";
+export type ProviderInfo = {
+  name: ProviderName;
+  label: string;
+  configured: boolean;
+  can_search: boolean; // open a track there
+  can_read: boolean; // import its playlists from a link
+  can_write: boolean; // save the set to it
+};
+
 export type PreviewSource = "deezer" | "itunes";
 export type PreviewOutcome =
   | "ok"
@@ -165,17 +184,18 @@ export const api = {
     ),
 
   importPlaylist: (url: string) =>
-    request<{
-      playlist: { id: string; name: string };
-      tracks: Track[];
-      total: number;
-      missing: number;
-      loose: number; // matched by title + artist (Spotify id changed since 2018)
-      unmatched: string[];
-    }>("/import", {
-      method: "POST",
-      body: JSON.stringify({ url }),
-    }),
+    request<ImportResult>("/import", { method: "POST", body: JSON.stringify({ url }) }),
+
+  /** Seeds from a pasted song list (one per line; Apple Music copy-paste works). */
+  importText: (text: string) =>
+    request<ImportResult>("/import/text", { method: "POST", body: JSON.stringify({ text }) }),
+
+  /** Music services and what Swave can do with each. */
+  providers: () => request<ProviderInfo[]>("/providers"),
+
+  /** Link that redirects to the track on a service (or a search there). */
+  openUrl: (provider: string, trackUri: string) =>
+    `${API_URL}/providers/${provider}/open?${new URLSearchParams({ track_uri: trackUri })}`,
 
   /** Fire-and-forget: logging must never break the UI. */
   log: (events: AppEvent[]) => {

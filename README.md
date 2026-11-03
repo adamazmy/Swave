@@ -22,6 +22,7 @@ offline:  MPD slices ─▶ make ingest ─▶ make build-index ─┐
 - **Ingest** streams the dataset slices (straight from the zip or from unzipped JSON) into Postgres: `tracks` and `playlist_tracks`. Tracks in fewer than 5 playlists are pruned.
 - **Recommender v1: item-item co-occurrence.** A sparse playlist × track matrix gives, for every pair of tracks, how many playlists contain both. That count is normalised by popularity (cosine, or positive PMI), and the top-200 neighbours of each track are stored in a `neighbours` table so requests are fast.
 - **Recommender v2: pluggable scorers.** Each scorer (MPD playlist co-occurrence, ListenBrainz listening-session co-occurrence) scores candidates 0–1; the ranker adds them with weights from [`scorers.json`](scorers.json), divides by `popularity^alpha` (the familiar ↔ adventurous slider) and explains each pick with its top scorer(s).
+- **Spotify or Apple Music.** Spotify users import playlists and save sets with one click. Apple Music users paste songs copied from Apple Music, then take the set back with a copied song list (for transfer tools like TuneMyMusic or SongShift), a CSV, or an Open-in-Apple-Music link per song (via the free iTunes Search API; saving straight to an Apple Music library would need Apple's paid MusicKit).
 - **ListenBrainz** (`make lb-ingest`, `make lb-build`): the last 3 years of public listens are read column-by-column from the remote dump (HTTP range requests, ~34 GB of the 249 GB), split into listening sessions (new session after 30 min, repeats collapsed, < 3 songs dropped) and turned into a second co-occurrence index. Songs are linked to the MPD tracks by normalised artist + title; the others (mostly post-2017 music) become new tracks, resolved to Spotify only when shown.
 
 > Status: MVP complete (M1–M5): pipeline, evaluation, API, frontend, Spotify save, feedback report. See [PLAN.md](PLAN.md).
@@ -51,6 +52,9 @@ Every action in the app (shown, seeded, previewed, kept, removed, more like this
 | `GET /preview?track_uri=&exclude=` | Fresh 30-second preview URL from Deezer or iTunes (or `null` + why); provider ids cached in Postgres, URLs never |
 | `POST /previews/resolve` | Pre-resolve previews for up to 50 tracks; says which have one |
 | `POST /preview/attempts` | Log one preview click and its outcome (`make preview-report`) |
+| `GET /providers` | Music services and what Swave can do with each (`can_search`, `can_read`, `can_write`) |
+| `GET /providers/{spotify,apple}/open?track_uri=` | Redirect to the track on that service (or a search there) |
+| `POST /import/text` | Seeds from a pasted song list (`Title - Artist` lines; Apple Music copy-paste works) |
 | `GET /health` | How the neighbour index was built |
 | `GET /auth/login` → `/auth/callback`, `GET /auth/status`, `POST /auth/logout` | Spotify login (Authorization Code + PKCE, no client secret) |
 | `POST /save` `{name, track_uris[≤500], playlist_id?}` | New private playlist (`POST /me/playlists` + `POST /playlists/{id}/items`, batches of 100), or with `playlist_id`: rename + replace its songs (`PUT /playlists/{id}`, `PUT /playlists/{id}/items`) |

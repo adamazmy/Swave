@@ -207,3 +207,19 @@ folding, fuzzy titles with a duration check. iTunes adds little (US store, same 
 Live coverage from real clicks starts now: `make preview-report` (0 attempts at merge time).
 The old cache (`previews`, 77% of 258 tried tracks matched) only reflected tracks clicked.
 
+## V5: Apple Music, free version (branch `v5-apple`, 2026-11-03)
+
+Owner: "operate exactly like Spotify for Apple Music users", but no Apple Developer membership
+($99/yr, required by MusicKit for any library read/write). Decision: free version now, behind a
+provider adapter interface (can_search / can_read / can_write) so a MusicKit read/write adapter
+can be added later; no MusicKit code or placeholder keys.
+
+- `providers.py`: Spotify adapter (search + read + write), Apple adapter (search only, iTunes
+  Search API, Apple ids cached in `provider_tracks`, reusing iTunes preview matches).
+- "I listen on: Spotify | Apple Music" switch; the UI follows the capabilities.
+- Import: paste a song list (any "Title - Artist" shape, or Apple Music's copied columns);
+  Apple Music playlist links get a clear "copy the songs and paste them" message.
+- Save without write: copy "Title - Artist" list (for TuneMyMusic / SongShift), CSV, and an
+  "Open in Apple Music" link per kept song. No-preview rows open the track on the chosen service.
+- Previews: the iTunes step now goes through the Apple adapter's matcher (one implementation).
+

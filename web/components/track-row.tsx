@@ -18,6 +18,8 @@ type Props = {
   onRemove: () => void;
   /** Where the preview comes from (iTunes previews must link back to Apple Music). */
   previewInfo?: PreviewInfo;
+  /** Open the track on the user's service when it has no preview. */
+  open?: { href: string; label: string };
   /** "source": this song is being mixed in as a seed; "new": it just arrived from a mix. */
   mix?: "source" | "new";
   /** Order among the newly arrived songs, to stagger their entrance. */
@@ -46,6 +48,7 @@ export default function TrackRow(p: Props) {
         state={p.pending ? "loading" : p.preview}
         disabled={p.pending}
         onClick={p.onPreview}
+        open={p.open}
       />
 
       <div className="min-w-0 flex-1">
@@ -122,23 +125,26 @@ export function spotifyUrl(uri: string): string {
   return `https://open.spotify.com/track/${uri.split(":").pop()}`;
 }
 
-/** The preview button, or, for a track with no preview anywhere, a link to open it in Spotify. */
+/** The preview button, or, for a track with no preview anywhere, a link to open it on the
+ *  user's service (`open`; Spotify by default). */
 export function PreviewSlot(p: {
   uri: string;
   name: string;
   state: PreviewState;
   disabled?: boolean;
   onClick: () => void;
+  open?: { href: string; label: string };
 }) {
+  const open = p.open ?? { href: spotifyUrl(p.uri), label: "Spotify" };
   if (p.state !== "unavailable") return <PreviewButton name={p.name} state={p.state} disabled={p.disabled} onClick={p.onClick} />;
   return (
     <a
-      href={spotifyUrl(p.uri)}
+      href={open.href}
       target="_blank"
       rel="noreferrer"
       className={`grid h-9 w-9 shrink-0 place-items-center rounded-md border border-dashed border-line text-dim transition hover:border-pink/60 hover:text-pink ${focus}`}
-      aria-label={`No preview for ${p.name}: open it in Spotify`}
-      title="No preview available: open in Spotify"
+      aria-label={`No preview for ${p.name}: open it in ${open.label}`}
+      title={`No preview available: open in ${open.label}`}
     >
       <ExternalIcon className="h-3.5 w-3.5" />
     </a>

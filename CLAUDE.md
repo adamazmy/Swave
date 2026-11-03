@@ -27,6 +27,7 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
   - `track_meta(track_uri PK, isrc, duration_ms, checked_at)`: from Spotify `GET /tracks/{id}` (one call per track; the batch endpoint is 403 in dev mode), for ISRC lookup and the ±3 s duration check
   - `preview_attempts(id, ts, session_id, track_uri, outcome, source, steps)`: one row per play click with its final outcome (ok, no_match, matched_no_preview, expired_url, playback_error, source_error), logged by the browser
   - `spotify_auth(id=1, refresh_token, expires_at)`: single row, owner's token
+  - `provider_tracks(track_uri, provider, provider_id, checked_at)`: a track's id at another service (Apple Music song id from iTunes Search); NULL = not found, retried after 30 days
   - `lb_tracks(track_id, song, name, artist, recording_mbid, listeners, pop_est)`: ListenBrainz songs NOT in the MPD; `track_id`s continue after MPD's (594,421+), `song` = `matching.song_hash` of the normalised title+artist; `pop_est` = listeners mapped onto the playlist_count scale
   - `neighbours_lb(track_id, neighbour_id, sim, co_count)`: top-100 per track from listening sessions (ids = MPD or lb_tracks); `lb_holdout(sess, pos, track_id)`, `lb_meta(built_at, git, stats)`
   - `lb_spotify(song PK, track_uri NULL, checked_at)`: app-owned cache of resolved Spotify URIs for LB songs (misses cached, retried after 30 days), survives `lb-build`
@@ -57,6 +58,8 @@ api/                 Python package + FastAPI app
     deezer.py        Deezer API (search, ISRC, fresh preview URL); norm/pick also key playlist + LB matching
     itunes.py        iTunes Search API + process-wide rate-limit queue (20/min)
     spotify.py       PKCE OAuth + playlist save
+    providers.py     music-service adapters with capabilities (search/read/write): spotify (all), apple (search only)
+    paste.py         seeds from a pasted song list (Title - Artist lines, Apple Music clipboard columns)
     main.py          FastAPI routes: /search /recommend /events /auth/* /save
   tests/             pytest, synthetic fixtures only
 web/                 Next.js 16 app (2 screens: Seed, Results). Read web/AGENTS.md: this Next.js version
@@ -125,6 +128,10 @@ localStorage (this browser only): `swave-seed-draft` (Seed screen), `swave-resul
 
 Chain per track, first source with a preview wins: **Deezer by ISRC** (`/track/isrc:…`, ISRC from Spotify; if that version has no preview, e.g. region-locked, search for another version first) → **Deezer search** (advanced syntax first, it still returns 0 in 2026-11, then plain `"<artist> <title>"`) → **iTunes Search API** (unauthenticated, ~20 calls/min per IP, 403 or dropped TLS when exceeded: every call goes through `itunes.limiter`, a process-wide queue). Matching (`previews.choose`) uses its own loose normaliser (accents folded, feat./brackets/" - version" stripped, primary artist only) — **never change `deezer.norm`**, it keys `matching.song_hash`. Duration within ±3 s when known; fuzzy title (≥ 0.8) only with a matching duration; an ISRC hit is trusted on title alone (artist credits differ: soundtrack vs singer).
 Only provider ids are cached; a fresh URL is fetched at every play (Deezer URLs carry `hdnea=exp=<unix>` and expire). The browser (`use-preview.ts`) retries a failed URL once, then calls `/preview?exclude=<source>` to fall back, and logs one `preview_attempts` row per click. `/previews/resolve` pre-resolves the top 20 results in the background (all 40 with "Previewable only"). No preview → the play button becomes an "Open in Spotify" link; iTunes previews show an "Apple Music ↗" link (Apple's terms). Measured 2026-11-03 on 300 shown tracks: old 88.3% → new 96.7% (`make preview-bench`). Never block results on previews.
+
+## Music services (v5: `providers.py`)
+
+Each service is an adapter with capabilities `can_search` (open a track there), `can_read` (import a playlist link), `can_write` (save the set); `GET /providers` reports them and the web UI follows them, never the service name. **Spotify**: all three (existing /import, /save, /playlists routes). **Apple Music**: search only, through the free iTunes Search API (its trackId IS the Apple Music song id; `/providers/apple/open` redirects to `music.apple.com/song/<id>`, or to an Apple search page when not found / rate limited). Reading or writing an Apple Music library needs MusicKit = a paid Apple Developer key: owner decision 2026-11-03, **free version for now, no MusicKit code or placeholder keys**. A MusicKit adapter would implement `read_playlist`/`write_playlist` and flip those flags (it also needs a browser-side MusicKit authorisation step). Free substitutes: paste a song list (`/import/text`, also reads Apple Music's copied columns) and, when the chosen service can't write, the export bar (copy "Title - Artist" list, CSV, per-song Open links). Previews' iTunes step uses the Apple adapter's matcher. User's choice: localStorage `swave-provider`.
 
 ## Data licence
 

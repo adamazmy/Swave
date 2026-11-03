@@ -206,7 +206,7 @@ def test_import_maps_playlist_to_index(client):
     r = client.post("/import", json={"url": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=abc"})
     body = r.json()
     assert [t["track_uri"] for t in body["tracks"]] == [uri(1), uri(2)]  # episode skipped, 99 unknown
-    assert body["playlist"] == {"id": "37i9dQZF1DXcBWIGoYBM5M", "name": "My Road Trip"}
+    assert body["playlist"] == {"id": "37i9dQZF1DXcBWIGoYBM5M", "name": "My Road Trip", "provider": "spotify"}
     assert body["total"] == 3 and body["missing"] == 1
 
 

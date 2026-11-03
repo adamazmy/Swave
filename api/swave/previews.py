@@ -224,13 +224,13 @@ def resolve_deezer(http: httpx.Client, m: Meta, wait: float) -> Candidate | None
 
 
 def resolve_itunes(http: httpx.Client, m: Meta, wait: float) -> Candidate | None:
+    """iTunes Search via the Apple Music provider adapter (one matcher for previews and links)."""
+    from swave.providers import PROVIDERS  # providers imports previews lazily too
+
     try:
-        results = itunes.search(http, loose_artist(m.artist), loose_title(m.name), timeout=wait)
+        return PROVIDERS["apple"].match(http, m, timeout=wait)
     except itunes.ItunesError as e:
         raise SourceError(f"itunes: {e}") from e
-    cands = [Candidate(str(r["trackId"]), r.get("trackName", ""), r.get("artistName", ""),
-                       r.get("trackTimeMillis"), r.get("previewUrl") or None) for r in results]
-    return choose(cands, m.artist, m.name, m.duration_ms)
 
 
 def fresh_url(http: httpx.Client, source: str, provider_id: str, wait: float) -> str | None:

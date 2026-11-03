@@ -16,10 +16,14 @@ import {
   writeDraft,
   type ImportInfo,
 } from "@/lib/stored";
+import { openTrackUrl, useProvider } from "@/lib/provider";
 import { usePreview } from "@/lib/use-preview";
 import { PlusIcon, Spinner, XIcon } from "./icons";
 import { Mosaic, Ticker } from "./night";
+import ProviderSwitch from "./provider-switch";
 import { PreviewSlot } from "./track-row";
+
+const PASTE_EXAMPLE = ["Mr. Brightside - The Killers", "September - Earth, Wind & Fire"].join("\n");
 
 export default function SeedScreen() {
   const router = useRouter();
@@ -29,6 +33,7 @@ export default function SeedScreen() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
   const preview = usePreview();
+  const provider = useProvider();
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [seeds, setSeeds] = useState<Track[]>(() => draft?.seeds ?? []);
@@ -140,6 +145,28 @@ export default function SeedScreen() {
     }
   }
 
+  // Pasted song list (one per line): the way in for Apple Music, whose playlists Swave can't read.
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+
+  async function importText() {
+    if (!pasteText.trim()) return;
+    setImporting(true);
+    setImportMsg(null);
+    try {
+      const res = await api.importText(pasteText);
+      setSource(res.playlist);
+      setSourceTracks(res.tracks);
+      setImportInfo({ total: res.total, missing: res.missing, loose: res.loose, unmatched: res.unmatched });
+      setPasteText("");
+      setPasteOpen(false);
+    } catch (err) {
+      setImportMsg({ text: err instanceof ApiError ? err.message : "Couldn't read that list" });
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function start() {
     // Same seeds as the saved vibe (e.g. back from "Edit seeds"): continue it, keep its songs.
     const last = readLatestResults();
@@ -158,6 +185,7 @@ export default function SeedScreen() {
   }
 
   const linkMode = isPlaylistLink(query);
+  const apple = provider.name === "apple";
 
   return (
     <div className="space-y-8">
@@ -233,7 +261,13 @@ export default function SeedScreen() {
               autoComplete="off"
               value={query}
               onChange={(e) => onInput(e.target.value)}
-              placeholder={full ? "That's five. Build the set, or remove one" : "Add a track, or paste a playlist link"}
+              placeholder={
+                full
+                  ? "That's five. Build the set, or remove one"
+                  : apple
+                    ? "Add a track"
+                    : "Add a track, or paste a playlist link"
+              }
               className="w-full rounded-md border border-line bg-panel px-4 py-4 text-sm outline-none placeholder:text-dim focus:border-pink/60"
             />
             {(searching || importing) && <Spinner className="absolute right-4 top-4.5 h-4 w-4 text-muted" />}
@@ -257,6 +291,45 @@ export default function SeedScreen() {
             </button>
           )}
         </form>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <ProviderSwitch />
+          <button
+            type="button"
+            onClick={() => setPasteOpen((o) => !o)}
+            aria-expanded={pasteOpen}
+            className="label text-muted hover:text-text"
+          >
+            {pasteOpen ? "Close the list" : apple ? "Paste songs from Apple Music" : "Paste a song list"}
+          </button>
+        </div>
+
+        {pasteOpen && (
+          <div className="space-y-2 rounded-md border border-line bg-panel p-3">
+            <label htmlFor="paste-list" className="block text-sm text-muted">
+              One song per line, like <span className="text-text">Title - Artist</span>.
+              {apple && (
+                <> From Apple Music: select songs in a playlist, copy (Ctrl+C or ⌘C) and paste them here.</>
+              )}
+            </label>
+            <textarea
+              id="paste-list"
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              rows={6}
+              placeholder={PASTE_EXAMPLE}
+              className="w-full rounded-md border border-line bg-ink px-3 py-2 font-mono text-xs outline-none placeholder:text-dim focus:border-pink/60"
+            />
+            <button
+              type="button"
+              onClick={() => void importText()}
+              disabled={importing || !pasteText.trim()}
+              className="btn-label rounded-md border border-cream/60 px-4 py-2.5 text-cream hover:bg-cream/10 disabled:opacity-40"
+            >
+              Find these songs
+            </button>
+          </div>
+        )}
 
         {error && <p role="alert" className="text-sm text-pink">{error}</p>}
         {importMsg && (
@@ -282,12 +355,12 @@ export default function SeedScreen() {
         {importing && (
           <p role="status" className="label dots flex items-center gap-2 text-pink">
             <Spinner className="h-3.5 w-4" />
-            Reading the playlist
+            {pasteOpen ? "Matching your songs" : "Reading the playlist"}
           </p>
         )}
 
         {!full && !linkMode && results.length > 0 && (
-          <PickList tracks={results} onPick={add} isSeed={isSeed} preview={preview} />
+          <PickList tracks={results} onPick={add} isSeed={isSeed} preview={preview} provider={provider} />
         )}
 
         {!searching && !error && !linkMode && query.trim().length >= 2 && results.length === 0 && (
@@ -323,7 +396,7 @@ export default function SeedScreen() {
             </button>
           </div>
           {sourceTracks.length > 0 && (
-            <PickList tracks={sourceTracks} onPick={add} isSeed={isSeed} disabled={full} scroll preview={preview} />
+            <PickList tracks={sourceTracks} onPick={add} isSeed={isSeed} disabled={full} scroll preview={preview} provider={provider} />
           )}
           {importInfo.unmatched.length > 0 && (
             <details className="text-sm text-dim">
@@ -365,6 +438,7 @@ function PickList({
   onPick,
   isSeed,
   preview,
+  provider,
   disabled = false,
   scroll = false,
 }: {
@@ -372,6 +446,7 @@ function PickList({
   onPick: (t: Track) => void;
   isSeed: (t: Track) => boolean;
   preview: ReturnType<typeof usePreview>;
+  provider: ReturnType<typeof useProvider>;
   disabled?: boolean;
   scroll?: boolean;
 }) {
@@ -380,7 +455,8 @@ function PickList({
       {tracks.map((t) => (
         <li key={t.track_uri} className="flex items-center gap-1 border-b border-line/60 pl-3 last:border-b-0">
           <PreviewSlot uri={t.track_uri} name={t.name} state={preview.state(t.track_uri)}
-                       onClick={() => void preview.toggle(t.track_uri)} />
+                       onClick={() => void preview.toggle(t.track_uri)}
+                       open={{ href: openTrackUrl(provider.name, t.track_uri), label: provider.info.label }} />
           <button
             onClick={() => onPick(t)}
             disabled={disabled || isSeed(t)}
