@@ -50,3 +50,17 @@ export function Ticker({ items, empty }: { items: string[]; empty: string }) {
     </div>
   );
 }
+
+/** Full-width loader for pages and first results: a bouncing level meter + "TUNING IN...". */
+export function Loading({ label = "Tuning in" }: { label?: string }) {
+  return (
+    <div role="status" className="flex flex-col items-center gap-5 py-24 text-pink">
+      <span className="loader flex h-10 items-end gap-1.5" aria-hidden="true">
+        {Array.from({ length: 5 }, (_, i) => (
+          <span key={i} className="h-full w-1.5 rounded-[2px] bg-current" />
+        ))}
+      </span>
+      <p className="label dots ticker-glow">{label}</p>
+    </div>
+  );
+}

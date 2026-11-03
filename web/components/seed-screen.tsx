@@ -273,6 +273,19 @@ export default function SeedScreen() {
           <p className="label text-dim">Press Enter to load the playlist&apos;s songs</p>
         )}
 
+        {searching && results.length === 0 && (
+          <p role="status" className="label dots flex items-center gap-2 text-pink">
+            <Spinner className="h-3.5 w-4" />
+            Searching
+          </p>
+        )}
+        {importing && (
+          <p role="status" className="label dots flex items-center gap-2 text-pink">
+            <Spinner className="h-3.5 w-4" />
+            Reading the playlist
+          </p>
+        )}
+
         {!full && !linkMode && results.length > 0 && (
           <PickList tracks={results} onPick={add} isSeed={isSeed} preview={preview} />
         )}

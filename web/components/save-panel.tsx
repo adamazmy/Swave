@@ -209,7 +209,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
                 onChange={(e) => void onFile(e.target.files?.[0])}
               />
               <label htmlFor="cover-file" className={`${small} cursor-pointer`}>
-                {coverBusy ? "…" : "Upload"}
+                {coverBusy ? <Spinner className="h-3 w-3.5" /> : "Upload"}
               </label>
               <button onClick={generate} className={small}>
                 Generate

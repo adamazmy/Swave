@@ -32,7 +32,7 @@ export default function TrackRow(p: Props) {
         {String(p.position + 1).padStart(2, "0")}
       </span>
 
-      <PreviewButton name={t.name} state={p.preview} disabled={p.pending} onClick={p.onPreview} />
+      <PreviewButton name={t.name} state={p.pending ? "loading" : p.preview} disabled={p.pending} onClick={p.onPreview} />
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold">{t.name}</p>

@@ -18,8 +18,8 @@ import { currentSession } from "@/lib/session";
 import { readSource } from "@/lib/source";
 import { clearAll, readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
 import { usePreview } from "@/lib/use-preview";
-import { Bars, XIcon } from "./icons";
-import { Ticker } from "./night";
+import { Spinner, XIcon } from "./icons";
+import { Loading, Ticker } from "./night";
 import SavePanel from "./save-panel";
 import TrackRow from "./track-row";
 
@@ -46,6 +46,8 @@ export default function ResultsScreen() {
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<Status>(() => (restored || !seeds.length ? "ready" : "loading"));
   const [error, setError] = useState<string | null>(null);
+  // A re-rank (slider, more like this, seed removed) is in flight: the old list stays, dimmed.
+  const [reranking, setReranking] = useState(false);
   const [name, setName] = useState(() => restored?.name ?? "");
   const [description, setDescription] = useState(() => restored?.description ?? "Built with Swave");
   const [cover, setCover] = useState<string | null>(() => restored?.cover ?? null);
@@ -91,6 +93,7 @@ export default function ResultsScreen() {
   const load = useCallback(
     async (nextSeeds: string[], nextSlider: number) => {
       const id = ++requestId.current;
+      setReranking(true);
       const { list: cur, kept: k, removed: r, hiddenSongs: hidden } = latest.current;
       const keptTracks = cur.filter((t) => k.has(t.track_uri));
       try {
@@ -121,6 +124,9 @@ export default function ResultsScreen() {
         if (id !== requestId.current) return;
         setError(err instanceof ApiError ? err.message : "Couldn't load recommendations");
         setStatus("error");
+      } finally {
+        // Only the newest request clears it; a superseded one leaves it to its successor.
+        if (id === requestId.current) setReranking(false);
       }
     },
     [log, router, resultsUrl],
@@ -264,7 +270,7 @@ export default function ResultsScreen() {
         </button>
       </div>
 
-      <Ticker items={seedTracks.map((s) => s.name)} empty="Now loaded ▸ …" />
+      <Ticker items={seedTracks.map((s) => s.name)} empty="Now loaded ▸ tuning in" />
 
       <section aria-label="Seeds" className="flex flex-wrap gap-2">
         {seedTracks.map((s, i) => (
@@ -284,7 +290,15 @@ export default function ResultsScreen() {
       </section>
 
       <section className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
-        <h1 className="font-display text-xl tracking-[0.18em]">The set</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="font-display text-xl tracking-[0.18em]">The set</h1>
+          {reranking && status === "ready" && (
+            <span role="status" className="label dots flex items-center gap-2 text-pink">
+              <Spinner className="h-3.5 w-4" />
+              Re-cutting
+            </span>
+          )}
+        </div>
         <div className="w-full space-y-2 sm:w-80">
           <label htmlFor="vibe" className="label flex justify-between text-muted">
             <span>Familiar</span>
@@ -323,11 +337,7 @@ export default function ResultsScreen() {
         </p>
       )}
 
-      {status === "loading" && (
-        <div className="label flex items-center gap-3 py-12 text-pink">
-          <Bars playing className="h-4" /> Cutting your set…
-        </div>
-      )}
+      {status === "loading" && <Loading label="Cutting your set" />}
 
       {status === "error" && (
         <div role="alert" className="space-y-3 rounded-md border border-pink/40 bg-pink/5 p-4">
@@ -349,7 +359,10 @@ export default function ResultsScreen() {
       )}
 
       {status === "ready" && list.length > 0 && (
-        <ol className="border-t border-line/70">
+        <ol
+          className={`border-t border-line/70 transition-opacity duration-300 ${reranking ? "pointer-events-none opacity-50" : ""}`}
+          aria-busy={reranking}
+        >
           {list.map((t, i) => (
             <TrackRow
               key={t.track_uri}

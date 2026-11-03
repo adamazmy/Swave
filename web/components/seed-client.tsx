@@ -2,12 +2,13 @@
 
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
+import { Loading } from "./night";
 
 // Browser-only: SeedScreen restores the saved draft and last vibe from localStorage on its
 // first render, which must not be compared against server-rendered HTML.
 const SeedScreen = dynamic(() => import("./seed-screen"), {
   ssr: false,
-  loading: () => <p className="py-12 label text-dim">Loading…</p>,
+  loading: () => <Loading />,
 });
 
 /**
