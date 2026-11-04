@@ -12,7 +12,7 @@ K ?= 200
 MIN_CO ?= 2
 ALPHA ?= 0
 
-.PHONY: setup db ingest build-index lb-ingest lb-build lb-report eval api web dev feedback test preview-report preview-bench
+.PHONY: setup db ingest build-index lb-ingest lb-names lb-index lb-build lb-report eval api web dev feedback test preview-report preview-bench
 
 WEEKS ?= 8
 DAYS ?= 7
@@ -40,6 +40,15 @@ build-index: db     ## top-K neighbours per track -> neighbours table
 
 lb-ingest:          ## ListenBrainz listens since LB_SINCE -> data/lb/ (range-reads the remote dump)
 	$(VENV_PY) -m swave.pipeline.lb_ingest --since $(LB_SINCE)
+
+lb-names:           ## fold data/lb/names/<file>.parquet into one deduplicated table (verified)
+	$(VENV_PY) -m swave.pipeline.lb_names --delete-inputs
+
+lb-index: db        ## candidate LB index -> data/lb/runs/$(RUN)/ (app tables untouched); ARGS="--min-listeners 10 ..."
+	$(VENV_PY) -m swave.pipeline.lb_index --run $(RUN) $(ARGS)
+
+lb-eval: db         ## time-split eval of data/lb/runs/$(RUN) (LB only + the app's mix) -> eval/results.csv
+	$(VENV_PY) -m swave.pipeline.evaluate --holdout time --lb-run $(RUN) $(if $(LB_K),--lb-k $(LB_K)) --scorers eval/scorers/lb.json scorers.json
 
 lb-build: db        ## data/lb/ -> sessions, matching, lb_tracks, neighbours_lb, lb_holdout
 	$(VENV_PY) -m swave.pipeline.lb_build --min-listeners $(LB_MIN_LISTENERS) --k $(LB_K)

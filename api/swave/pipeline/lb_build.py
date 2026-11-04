@@ -125,28 +125,24 @@ def load_sessions(b: int) -> dict[str, np.ndarray]:
 
 # ── 3. names + matching ────────────────────────────────────────────────────────────────
 
-def vocab_names(vocab: np.ndarray, t0: float) -> pd.DataFrame:
-    """Most played spelling (+ a recording MBID) of each vocabulary song."""
-    path = BUILD / "names.parquet"
+def vocab_names(vocab: np.ndarray, t0: float, path: Path | None = None) -> pd.DataFrame:
+    """Most played spelling (+ a recording MBID) of each vocabulary song, from the merged names
+    table (`make lb-names`, data/lb/names_all/)."""
+    from swave.pipeline import lb_names
+
+    path = path or BUILD / "names.parquet"
     if path.exists():
         return pd.read_parquet(path)
+    if lb_names.inputs():
+        raise SystemExit("data/lb/names/ has unmerged per-file names: run `make lb-names` first")
     want = pa.array(vocab)
     parts = []
-    files = sorted((LB_DIR / "names").glob("*.parquet"))
-    for i, f in enumerate(files):
-        t = pq.read_table(f)
+    for f in sorted(lb_names.ALL.glob("s*.parquet")):
+        t = pq.read_table(f, columns=["song", "artist", "title", "mbid", "plays"])
         parts.append(t.filter(pc.is_in(t["song"], value_set=want)).to_pandas())
-        if len(parts) >= 40 or i == len(files) - 1:  # keep memory bounded
-            df = pd.concat(parts)
-            plays = df.groupby("song")["plays"].sum()
-            mbid = df.dropna(subset=["mbid"]).sort_values("plays", ascending=False) \
-                .drop_duplicates("song").set_index("song")["mbid"]
-            df = df.sort_values("plays", ascending=False).drop_duplicates("song").set_index("song")
-            df["plays"], df["mbid"] = plays, mbid.reindex(df.index)
-            parts = [df.reset_index()]
-        if i % 100 == 99:
-            log(f"  names: {i + 1}/{len(files)} files", t0)
-    names = parts[0].set_index("song").reindex(vocab).reset_index()
+    log("  names: read from names_all", t0)
+    names = pd.concat(parts).set_index("song").reindex(vocab).reset_index()
+    path.parent.mkdir(parents=True, exist_ok=True)
     names.to_parquet(path, index=False)
     return names
 
