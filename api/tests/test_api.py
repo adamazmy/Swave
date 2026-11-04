@@ -198,3 +198,15 @@ def test_exclude_songs_hides_every_version_of_a_song(client):
         "/recommend", json={"seeds": [uri(1)], "exclude_songs": [uri(2)]}).json()["results"]]
     assert uri(2) not in got and uri(6) not in got  # "Static Bloom" in any version
     assert uri(3) in got and uri(0) in got  # other songs untouched
+
+
+def test_new_artists_leaves_out_seed_artists(client):
+    base = [r["track_uri"] for r in client.post("/recommend", json={"seeds": [uri(1)]}).json()["results"]]
+    assert uri(0) in base  # same artist as the seed ("The Placeholders")
+    got = [r["track_uri"] for r in client.post(
+        "/recommend", json={"seeds": [uri(1)], "new_artists": True}).json()["results"]]
+    assert uri(0) not in got and uri(2) in got and uri(3) in got
+    # Artists of exclude_songs (an imported playlist) count as known too.
+    got = [r["track_uri"] for r in client.post("/recommend", json={
+        "seeds": [uri(1)], "new_artists": True, "exclude_songs": [uri(2)]}).json()["results"]]
+    assert got == [uri(3)]  # Mock Orchestra (2, 4, 6) gone as well

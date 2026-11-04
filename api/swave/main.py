@@ -76,6 +76,8 @@ class RecommendIn(BaseModel):
     # Songs to leave out by song, not only by id: any version with the same artist +
     # normalised title is excluded too (e.g. the songs of the pasted playlist).
     exclude_songs: list[str] = Field(default_factory=list, max_length=1000)
+    # Leave out every artist of the seeds (and of exclude_songs): only artists new to the set.
+    new_artists: bool = False
     n: int = Field(50, ge=1, le=100)
 
 
@@ -317,16 +319,24 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
 
             comb = rk.combine(active, np.array(seed_ids), body.adventure, pop_of)
             excluded = [t for u in set(body.seeds) | set(body.exclude) for t in ids.get(u, [])]
-            if body.exclude_songs and len(comb.track):
-                keys = {matching.song_key(r[0], r[1]) for r in conn.execute(
-                    "SELECT name, artist FROM all_tracks WHERE track_uri = ANY(%s)",
-                    (body.exclude_songs,)).fetchall()}
+            if (body.exclude_songs or body.new_artists) and len(comb.track):
                 tl = comb.track.tolist()
-                excluded += [r[0] for r in conn.execute(
+                cands = conn.execute(
                     """SELECT track_id, name, artist FROM tracks WHERE track_id = ANY(%s)
                        UNION ALL SELECT track_id, name, artist FROM lb_tracks
                        WHERE track_id = ANY(%s)""", (tl, tl)).fetchall()
-                    if matching.song_key(r[1], r[2]) in keys]
+                known = conn.execute(
+                    "SELECT name, artist FROM all_tracks WHERE track_uri = ANY(%s)",
+                    (body.exclude_songs,)).fetchall() if body.exclude_songs else []
+                keys = {matching.song_key(n, a) for n, a in known}
+                excluded += [t for t, n, a in cands if matching.song_key(n, a) in keys]
+                if body.new_artists:
+                    # Primary artist, loosely ("X feat. Y", "X & Y" → "x"), so features count too.
+                    old = {previews.loose_artist(a) for _, a in known} | {
+                        previews.loose_artist(r[0]) for r in conn.execute(
+                            "SELECT artist FROM all_tracks WHERE track_uri = ANY(%s)",
+                            (body.seeds,)).fetchall()}
+                    excluded += [t for t, _, a in cands if previews.loose_artist(a) in old]
             exclude = np.array(excluded)
             alpha = body.alpha if body.adventure is None else rk.alpha_for(
                 body.adventure, comb, exclude, body.n)

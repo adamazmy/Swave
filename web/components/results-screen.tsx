@@ -65,6 +65,8 @@ export default function ResultsScreen() {
   const hiddenSongs = hideSource ? (source?.trackUris ?? []) : [];
   // "Previewable only" (off by default): hide songs known to have no preview anywhere.
   const [previewOnly, setPreviewOnly] = useState(false);
+  // "New artists only" (off by default): leave out every artist already among the seeds.
+  const [newArtists, setNewArtists] = useState(() => restored?.newArtists ?? false);
   const provider = useProvider();
   // Alpha the API picked for the current list: replacements must use the same one.
   const [alpha, setAlpha] = useState(() => restored?.alpha ?? 0);
@@ -86,9 +88,9 @@ export default function ResultsScreen() {
   const session = useRef<string>("");
   const requestId = useRef(0);
   // Latest values for async callbacks without re-creating them (updated after each render).
-  const latest = useRef({ list, kept, removed, seeds, slider, hiddenSongs });
+  const latest = useRef({ list, kept, removed, seeds, slider, hiddenSongs, newArtists });
   useLayoutEffect(() => {
-    latest.current = { list, kept, removed, seeds, slider, hiddenSongs };
+    latest.current = { list, kept, removed, seeds, slider, hiddenSongs, newArtists };
   });
 
   const log = useCallback((events: Omit<AppEvent, "session_id" | "slider">[]) => {
@@ -116,7 +118,7 @@ export default function ResultsScreen() {
       setReranking(true);
       clearTimeout(mixedTimer.current);
       setMixed(null);
-      const { list: cur, kept: k, removed: r, hiddenSongs: hidden } = latest.current;
+      const { list: cur, kept: k, removed: r, hiddenSongs: hidden, newArtists: fresh } = latest.current;
       const keptTracks = cur.filter((t) => k.has(t.track_uri));
       try {
         // Kept tracks are not excluded, so they come back with up-to-date reasons.
@@ -125,6 +127,7 @@ export default function ResultsScreen() {
           adventure: clampSlider(nextSlider),
           exclude: [...r],
           exclude_songs: hidden,
+          new_artists: fresh,
           n: Math.min(100, LIST_SIZE + keptTracks.length),
         });
         if (id !== requestId.current) return; // a newer request superseded this one
@@ -180,13 +183,19 @@ export default function ResultsScreen() {
     if (status !== "ready" || list.length === 0) return;
     writeResults({
       run, seeds, slider, list, kept: [...kept], removed: [...removed], seedTracks,
-      name, description, cover, alpha, saved, hideSource,
+      name, description, cover, alpha, saved, hideSource, newArtists,
     });
-  }, [status, run, seeds, slider, list, kept, removed, seedTracks, name, description, cover, alpha, saved, hideSource]);
+  }, [status, run, seeds, slider, list, kept, removed, seedTracks, name, description, cover, alpha, saved, hideSource, newArtists]);
 
   function toggleHideSource(on: boolean) {
     setHideSource(on);
     latest.current.hiddenSongs = on ? (source?.trackUris ?? []) : [];
+    void load(latest.current.seeds, latest.current.slider);
+  }
+
+  function toggleNewArtists(on: boolean) {
+    setNewArtists(on);
+    latest.current.newArtists = on;
     void load(latest.current.seeds, latest.current.slider);
   }
 
@@ -233,6 +242,7 @@ export default function ResultsScreen() {
         alpha,
         exclude: [...latest.current.list.map((x) => x.track_uri), ...nextRemoved],
         exclude_songs: hiddenSongs,
+        new_artists: newArtists,
         n: 1,
       });
       replacement = res.results[0];
@@ -394,6 +404,10 @@ export default function ResultsScreen() {
             <span className="text-dim">({source.trackUris?.length})</span>
           </label>
         )}
+        <label className="flex items-center gap-2 text-sm text-muted">
+          <input type="checkbox" checked={newArtists} onChange={(e) => toggleNewArtists(e.target.checked)} />
+          New artists only
+        </label>
         <label className="flex items-center gap-2 text-sm text-muted">
           <input type="checkbox" checked={previewOnly} onChange={(e) => setPreviewOnly(e.target.checked)} />
           Previewable only

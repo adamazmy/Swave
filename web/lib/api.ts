@@ -126,6 +126,7 @@ export const api = {
     alpha?: number;
     exclude?: string[];
     exclude_songs?: string[]; // hidden in every version (same artist + title)
+    new_artists?: boolean; // leave out the seeds' artists (and those of exclude_songs)
     n?: number;
   }) =>
     request<{ results: Recommendation[]; seeds: Track[]; unknown_seeds: string[]; alpha: number }>("/recommend", {
