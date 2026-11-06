@@ -69,3 +69,15 @@ date,git,method,k,min_co,alpha,n_eval,seeds,at,hit_rate,recall,seconds,scorers,h
 2026-11-06 14:24,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6215,0.2147,45,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 related_artists=0.15,time/hist_hl2
 2026-11-06 14:24,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6150,0.2087,38,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 related_artists=0.25,time/hist_hl2
 2026-11-06 14:24,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5940,0.1855,37,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 related_artists=0.5,time/hist_hl2
+2026-11-06 17:51,9d689bd,cosine,100,2,0.0,2000,5,50,0.6150,0.2087,66,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 related_artists=0.25,time/hist_hl2
+2026-11-06 17:53,9d689bd,cosine,100,2,0.0,2000,5,50,0.6035,0.2058,136,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 discogs_style=0.25 related_artists=0.25,time/hist_hl2
+2026-11-06 17:53,9d689bd,cosine,100,2,0.0,2000,5,50,0.6350,0.2278,29,cooccurrence_lb=1,time/hist_hl2
+2026-11-06 18:00,9d689bd,cosine,100,2,0.0,2000,5,50,0.6435,0.2265,491,cooccurrence_lb=1 lb_similar_artists=0.25,time/hist_hl2
+2026-11-06 18:01,9d689bd,cosine,100,2,0.0,2000,5,50,0.6310,0.2255,57,cooccurrence_lb=1 discogs_style=0.25,time/hist_hl2
+2026-11-06 18:03,9d689bd,cosine,100,2,0.0,2000,5,50,0.6320,0.2252,160,cooccurrence_lb=1 discogs_style=0.25 lb_similar_artists=0.25,time/hist_hl2
+2026-11-06 18:46,9d689bd,cosine,200,2,0.0,1000,5,50,0.8900,0.1788,2563,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 related_artists=0.25,mpd
+2026-11-06 18:47,9d689bd,cosine,200,2,0.0,1000,5,50,0.8970,0.1729,2625,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 discogs_style=0.25 related_artists=0.25,mpd
+2026-11-06 18:47,9d689bd,cosine,200,2,0.0,1000,5,50,0.6930,0.0863,2552,cooccurrence_lb=1,mpd
+2026-11-06 18:55,9d689bd,cosine,200,2,0.0,1000,5,50,0.7700,0.0994,3006,cooccurrence_lb=1 lb_similar_artists=0.25,mpd
+2026-11-06 18:55,9d689bd,cosine,200,2,0.0,1000,5,50,0.7120,0.0873,2575,cooccurrence_lb=1 discogs_style=0.25,mpd
+2026-11-06 18:57,9d689bd,cosine,200,2,0.0,1000,5,50,0.7720,0.1012,2661,cooccurrence_lb=1 discogs_style=0.25 lb_similar_artists=0.25,mpd
