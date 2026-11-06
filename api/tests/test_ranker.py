@@ -127,4 +127,17 @@ def test_load_weights(tmp_path):
 
 
 def test_repo_config_is_valid():
-    assert rk.load_weights(rk.weights_path()) == {"cooccurrence_mpd": 0.5, "cooccurrence_lb": 0.5}
+    assert rk.load_weights(rk.weights_path())  # loads, known scorers, at least one weight > 0
+
+
+def test_cap_artists_keeps_best_per_artist_and_counts_the_list():
+    r = rk.Ranked(np.array([10, 11, 12, 13, 14]), np.array([5.0, 4, 3, 2, 1]), np.ones(5),
+                  np.arange(5))
+    artist = {10: "a", 11: "a", 12: "a", 13: "b"}  # 14: unknown artist, never capped
+    got = rk.cap_artists(r, artist, 2, 4)
+    assert got.track.tolist() == [10, 11, 13, 14] and got.rows.tolist() == [0, 1, 3, 4]
+    assert rk.cap_artists(r, artist, 2, 2).track.tolist() == [10, 11]
+    assert rk.cap_artists(r, artist, 2, 3, {"a": 2, "b": 2}).track.tolist() == [14, 10, 11]
+    # soft cap: too few other candidates, so the over-cap ones fill the end, best first
+    assert rk.cap_artists(r, artist, 2, 10).track.tolist() == [10, 11, 13, 14, 12]
+    assert rk.cap_artists(r, artist, 1, 5).track.tolist() == [10, 13, 14, 11, 12]

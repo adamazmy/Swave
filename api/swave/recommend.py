@@ -103,6 +103,28 @@ def penalise(c: Combined, alpha: float, exclude: np.ndarray, n: int) -> Ranked:
     return Ranked(c.track[idx], total[idx], c.pop[idx], idx)
 
 
+def cap_artists(r: Ranked, artist_of: dict[int, str], cap: int, n: int,
+                already: dict[str, int] | None = None) -> Ranked:
+    """Best first, at most `cap` results per artist, up to n. `already`: results the list holds
+    per artist (a replacement must not push an artist over the cap). Unknown artists are not capped.
+    Soft cap: when too few candidates are left (one seed, a small pool), the over-cap tracks fill
+    the end of the list, best first, rather than returning a short list."""
+    seen = dict(already or {})
+    keep, over = [], []
+    for i, t in enumerate(r.track.tolist()):
+        a = artist_of.get(t)
+        if a is not None:
+            if seen.get(a, 0) >= cap:
+                over.append(i)
+                continue
+            seen[a] = seen.get(a, 0) + 1
+        keep.append(i)
+        if len(keep) == n:
+            break
+    k = np.array(keep + over[:n - len(keep)], dtype=np.int64)
+    return Ranked(r.track[k], r.score[k], r.pop[k], r.rows[k])
+
+
 def alpha_for(adventure: float, c: Combined, exclude: np.ndarray, n: int, iters: int = 12) -> float:
     """Alpha that makes the slider feel even for every seed set.
 

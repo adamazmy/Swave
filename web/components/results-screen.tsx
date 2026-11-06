@@ -101,6 +101,21 @@ export default function ResultsScreen() {
            position: latest.current.list.findIndex((x) => x.track_uri === uri) }]),
   );
 
+  // Album covers, fetched in the background for songs that don't have one yet (never blocks the list).
+  const [covers, setCovers] = useState<Record<string, string | null>>({});
+  const asked = useRef(new Set<string>());
+  const coverKey = list.map((t) => t.track_uri).join(",");
+  useEffect(() => {
+    const uris = coverKey.split(",").filter((u) => u && !asked.current.has(u));
+    if (!uris.length) return;
+    uris.forEach((u) => asked.current.add(u));
+    for (let i = 0; i < uris.length; i += 100) {
+      api.covers(uris.slice(i, i + 100))
+        .then((got) => setCovers((c) => ({ ...c, ...got })))
+        .catch(() => uris.slice(i, i + 100).forEach((u) => asked.current.delete(u))); // retry on the next change
+    }
+  }, [coverKey]);
+
   // Pre-resolve previews in the background: the top 20 whenever the list changes (all of it
   // with "Previewable only"), so play starts fast and songs without one show a link instead.
   const prefetchPreviews = preview.prefetch;
@@ -243,6 +258,8 @@ export default function ResultsScreen() {
         exclude: [...latest.current.list.map((x) => x.track_uri), ...nextRemoved],
         exclude_songs: hiddenSongs,
         new_artists: newArtists,
+        // the rest of the list counts toward the per-artist cap
+        listed: latest.current.list.map((x) => x.track_uri).filter((u) => u !== t.track_uri),
         n: 1,
       });
       replacement = res.results[0];
@@ -464,6 +481,7 @@ export default function ResultsScreen() {
                 pending={pending.has(t.track_uri)}
                 preview={preview.state(t.track_uri)}
                 previewInfo={preview.info(t.track_uri)}
+                cover={covers[t.track_uri]}
                 open={{ href: openTrackUrl(provider.name, t.track_uri), label: provider.info.label }}
                 canAddSeed={seeds.length < MAX_SEEDS}
                 onPreview={() => void preview.toggle(t.track_uri)}

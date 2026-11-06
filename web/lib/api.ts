@@ -127,6 +127,8 @@ export const api = {
     exclude?: string[];
     exclude_songs?: string[]; // hidden in every version (same artist + title)
     new_artists?: boolean; // leave out the seeds' artists (and those of exclude_songs)
+    max_per_artist?: number; // results per primary artist (server default 5; 0 = no cap)
+    listed?: string[]; // tracks already on the list: they count toward max_per_artist
     n?: number;
   }) =>
     request<{ results: Recommendation[]; seeds: Track[]; unknown_seeds: string[]; alpha: number }>("/recommend", {
@@ -139,6 +141,13 @@ export const api = {
     request<PreviewResult>(
       `/preview?${new URLSearchParams([["track_uri", trackUri], ...exclude.map((s) => ["exclude", s])])}`,
     ),
+
+  /** Album cover URL per track (null = none found). Cached server-side; up to 100 per call. */
+  covers: (trackUris: string[]) =>
+    request<Record<string, string | null>>("/covers", {
+      method: "POST",
+      body: JSON.stringify({ track_uris: trackUris }),
+    }),
 
   /** Pre-resolve previews (cached server-side) and say which tracks have one. */
   resolvePreviews: (trackUris: string[]) =>

@@ -89,7 +89,8 @@ def client(dsn, fake, monkeypatch):  # noqa: F811
     with psycopg.connect(dsn) as conn:
         conn.execute("DROP TABLE IF EXISTS spotify_auth")
     http = httpx.Client(transport=httpx.MockTransport(fake))
-    with TestClient(create_app(dsn, http=http), follow_redirects=False) as c:
+    with TestClient(create_app(dsn, http=http, weights={"cooccurrence_mpd": 1.0}),
+                    follow_redirects=False) as c:
         yield c
 
 

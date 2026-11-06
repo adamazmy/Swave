@@ -72,7 +72,8 @@ def dsn() -> str:
 
 @pytest.fixture
 def client(dsn):
-    with TestClient(create_app(dsn)) as c:
+    # explicit weights: tests must not depend on the owner's scorers.json
+    with TestClient(create_app(dsn, weights={"cooccurrence_mpd": 0.5, "cooccurrence_lb": 0.5})) as c:
         yield c
 
 
@@ -192,12 +193,38 @@ def test_deezer_pick_prefers_exact_title_and_same_artist():
 
 
 def test_exclude_songs_hides_every_version_of_a_song(client):
-    base = [r["track_uri"] for r in client.post("/recommend", json={"seeds": [uri(1)]}).json()["results"]]
+    base = [r["track_uri"] for r in client.post(
+        "/recommend", json={"seeds": [uri(1)], "max_per_artist": 0}).json()["results"]]
     assert uri(2) in base and uri(6) in base  # studio + live version are both candidates
     got = [r["track_uri"] for r in client.post(
         "/recommend", json={"seeds": [uri(1)], "exclude_songs": [uri(2)]}).json()["results"]]
     assert uri(2) not in got and uri(6) not in got  # "Static Bloom" in any version
     assert uri(3) in got and uri(0) in got  # other songs untouched
+
+
+def test_max_per_artist_caps_each_artist(client):
+    """Seed 1's candidates by score: 2, 3, 0, 4, 6; Mock Orchestra = 2, 4, 6."""
+    got = [r["track_uri"] for r in client.post("/recommend", json={"seeds": [uri(1)]}).json()["results"]]
+    assert got == [uri(2), uri(3), uri(0), uri(4), uri(6)]  # default cap 5: nobody is over it
+    got = [r["track_uri"] for r in client.post(
+        "/recommend", json={"seeds": [uri(1)], "max_per_artist": 2, "n": 4}).json()["results"]]
+    assert got == [uri(2), uri(3), uri(0), uri(4)]  # cap 2: the 3rd Mock Orchestra is out
+    got = [r["track_uri"] for r in client.post(
+        "/recommend", json={"seeds": [uri(1)], "max_per_artist": 1, "n": 3}).json()["results"]]
+    assert got == [uri(2), uri(3), uri(0)]
+    # soft cap: not enough other artists, so the over-cap songs fill the end of the list
+    got = [r["track_uri"] for r in client.post(
+        "/recommend", json={"seeds": [uri(1)], "max_per_artist": 1}).json()["results"]]
+    assert got == [uri(2), uri(3), uri(0), uri(4), uri(6)]
+    got = [r["track_uri"] for r in client.post(
+        "/recommend", json={"seeds": [uri(1)], "max_per_artist": 0}).json()["results"]]
+    assert got == [uri(2), uri(3), uri(0), uri(4), uri(6)]  # 0 = no cap
+    # A replacement: Mock Orchestra already has 2 songs on the list, so it is skipped.
+    got = [r["track_uri"] for r in client.post("/recommend", json={
+        "seeds": [uri(1)], "exclude": [uri(2), uri(4), uri(3)], "listed": [uri(2), uri(4)],
+        "max_per_artist": 2,
+        "n": 1}).json()["results"]]
+    assert got == [uri(0)]
 
 
 def test_new_artists_leaves_out_seed_artists(client):

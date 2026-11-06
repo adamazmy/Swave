@@ -24,6 +24,8 @@ type Props = {
   mix?: "source" | "new";
   /** Order among the newly arrived songs, to stagger their entrance. */
   mixOrder?: number;
+  /** Album cover URL; undefined while loading, null when there is none. */
+  cover?: string | null;
 };
 
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink";
@@ -50,6 +52,8 @@ export default function TrackRow(p: Props) {
         onClick={p.onPreview}
         open={p.open}
       />
+
+      <Cover src={p.cover} />
 
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-2 text-sm font-semibold">
@@ -117,6 +121,17 @@ export default function TrackRow(p: Props) {
         </button>
       </div>
     </li>
+  );
+}
+
+/** Album cover, or a blank tile while it loads / when there is none (keeps rows aligned). */
+function Cover({ src }: { src?: string | null }) {
+  return src ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" width={40} height={40} loading="lazy" decoding="async"
+         className="h-10 w-10 shrink-0 rounded-sm bg-raised object-cover" />
+  ) : (
+    <span aria-hidden className="h-10 w-10 shrink-0 rounded-sm bg-raised" />
   );
 }
 

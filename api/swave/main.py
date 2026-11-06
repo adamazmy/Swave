@@ -17,12 +17,13 @@ from fastapi.responses import RedirectResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, StringConstraints
 
-from swave import itunes, lb, matching, paste, previews, providers, recommend as rk, resolve, scorers, spotify
+from swave import covers, itunes, lb, matching, paste, previews, providers, recommend as rk, resolve, scorers, spotify
 from swave.config import database_url
 from swave.recommend import MAX_ALPHA
 
 TRACK_URI = r"^spotify:track:[A-Za-z0-9]{22}$"
 RESOLVE_SPARE = 25  # extra ranked rows so dropped (unresolvable) ListenBrainz tracks get replaced
+MAX_PER_ARTIST = 5  # default cap per primary artist (listening sessions are often album runs)
 ACTIONS = ("shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved")
 Action = Literal["shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved"]
 
@@ -78,6 +79,10 @@ class RecommendIn(BaseModel):
     exclude_songs: list[str] = Field(default_factory=list, max_length=1000)
     # Leave out every artist of the seeds (and of exclude_songs): only artists new to the set.
     new_artists: bool = False
+    # At most this many results per primary artist ("X feat. Y" counts as X); 0 = no cap.
+    max_per_artist: int = Field(MAX_PER_ARTIST, ge=0, le=100)
+    # Tracks already on the list: they count toward the cap (replacing one removed song).
+    listed: list[str] = Field(default_factory=list, max_length=1000)
     n: int = Field(50, ge=1, le=100)
 
 
@@ -105,6 +110,11 @@ class PreviewOut(BaseModel):
 
 
 PreviewSource = Literal["deezer", "itunes"]
+
+
+class CoversIn(BaseModel):
+    track_uris: list[Annotated[str, StringConstraints(pattern=TRACK_URI)]] = Field(
+        min_length=1, max_length=covers.MAX_URIS)
 
 
 class PreviewResolveIn(BaseModel):
@@ -214,6 +224,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             conn.execute(lb.VIEW)
             conn.execute(previews.SCHEMA)
             conn.execute(providers.SCHEMA)
+            conn.execute(covers.SCHEMA)
         yield
         pool.close()
         http.close()
@@ -319,12 +330,14 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
 
             comb = rk.combine(active, np.array(seed_ids), body.adventure, pop_of)
             excluded = [t for u in set(body.seeds) | set(body.exclude) for t in ids.get(u, [])]
-            if (body.exclude_songs or body.new_artists) and len(comb.track):
+            cands = []
+            if (body.exclude_songs or body.new_artists or body.max_per_artist) and len(comb.track):
                 tl = comb.track.tolist()
                 cands = conn.execute(
                     """SELECT track_id, name, artist FROM tracks WHERE track_id = ANY(%s)
                        UNION ALL SELECT track_id, name, artist FROM lb_tracks
                        WHERE track_id = ANY(%s)""", (tl, tl)).fetchall()
+            if (body.exclude_songs or body.new_artists) and len(comb.track):
                 known = conn.execute(
                     "SELECT name, artist FROM all_tracks WHERE track_uri = ANY(%s)",
                     (body.exclude_songs,)).fetchall() if body.exclude_songs else []
@@ -341,7 +354,19 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             alpha = body.alpha if body.adventure is None else rk.alpha_for(
                 body.adventure, comb, exclude, body.n)
             # A few spare rows: ListenBrainz-only tracks without a Spotify match are dropped.
-            res = rk.penalise(comb, alpha, exclude, body.n + RESOLVE_SPARE)
+            if body.max_per_artist:
+                artist_of = {t: previews.loose_artist(a) for t, _, a in cands}
+                already: dict[str, int] = {}
+                rows = conn.execute(
+                    "SELECT DISTINCT ON (track_uri) artist FROM all_tracks WHERE track_uri = ANY(%s)",
+                    (list(set(body.listed)),)).fetchall() if body.listed else []
+                for (a,) in rows:
+                    key = previews.loose_artist(a)
+                    already[key] = already.get(key, 0) + 1
+                res = rk.cap_artists(rk.penalise(comb, alpha, exclude, len(comb.track)), artist_of,
+                                     body.max_per_artist, body.n + RESOLVE_SPARE, already)
+            else:
+                res = rk.penalise(comb, alpha, exclude, body.n + RESOLVE_SPARE)
             why = rk.reasons(active, comb, res, len(seed_ids))
             mpd = comb.data.get("cooccurrence_mpd", {})
             zeros = np.zeros(len(comb.track), dtype=np.int64)
@@ -409,6 +434,11 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                 raise HTTPException(404, "Unknown track") from None
         return PreviewOut(track_uri=track_uri, preview_url=r.preview_url, source=r.source,
                           outcome=r.outcome, open_url=previews.open_url(r.source, r.provider_id))
+
+    @app.post("/covers")
+    def get_covers(body: CoversIn) -> dict[str, str | None]:
+        """{uri: album cover URL or null}. Cached; called by the UI after the list is shown."""
+        return covers.get(pool, http, body.track_uris)
 
     @app.post("/previews/resolve")
     def previews_resolve(body: PreviewResolveIn) -> dict:
