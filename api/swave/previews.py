@@ -15,6 +15,7 @@ it re-asks once on a playback error, then excludes that source to fall back to t
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 from difflib import SequenceMatcher
@@ -29,7 +30,13 @@ from psycopg_pool import ConnectionPool
 
 from swave import deezer, itunes, spotify
 
-SOURCES = ("deezer", "itunes")
+KNOWN_SOURCES = ("deezer", "itunes")
+# Tried in this order; SWAVE_PREVIEW_SOURCES=itunes drops Deezer (non-commercial terms: public
+# mode refuses it, see licences.py).
+SOURCES = tuple(s.strip() for s in os.environ.get("SWAVE_PREVIEW_SOURCES", ",".join(KNOWN_SOURCES)).split(",")
+                if s.strip())
+if not SOURCES or set(SOURCES) - set(KNOWN_SOURCES):
+    raise ValueError(f"SWAVE_PREVIEW_SOURCES: expected a list from {KNOWN_SOURCES}, got {SOURCES}")
 OUTCOMES = ("ok", "no_match", "matched_no_preview", "expired_url", "playback_error", "source_error")
 RETRY_MISS_AFTER = timedelta(days=30)
 DURATION_TOLERANCE_MS = 3000

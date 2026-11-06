@@ -12,7 +12,7 @@ K ?= 200
 MIN_CO ?= 2
 ALPHA ?= 0
 
-.PHONY: setup db ingest build-index lb-ingest lb-names lb-index lb-install lb-build lb-report eval api web dev feedback test preview-report preview-bench
+.PHONY: setup db ingest build-index lb-ingest lb-names lb-index lb-install artist-index discogs-styles lb-build lb-report eval api web dev feedback test preview-report preview-bench
 
 WEEKS ?= 8
 DAYS ?= 7
@@ -52,6 +52,12 @@ lb-eval: db         ## time-split eval of data/lb/runs/$(RUN) (LB only + the app
 
 lb-install: db      ## data/lb/runs/$(RUN) -> app tables (old ones kept as *_old); ARGS="--rollback" / "--drop-old"
 	$(VENV_PY) -m swave.pipeline.lb_install $(if $(RUN),--run $(RUN)) $(ARGS)
+
+artist-index: db    ## top songs per artist (tracks + lb_tracks) for the related-artists scorer (~30 s)
+	$(VENV_PY) -m swave.pipeline.artist_index
+
+discogs-styles: db  ## artist_styles from a Discogs masters dump (CC0): DUMP=data/discogs/discogs_YYYYMMDD_masters.xml.gz
+	$(VENV_PY) -m swave.pipeline.discogs_styles $(DUMP)
 
 lb-build: db        ## data/lb/ -> sessions, matching, lb_tracks, neighbours_lb, lb_holdout
 	$(VENV_PY) -m swave.pipeline.lb_build --min-listeners $(LB_MIN_LISTENERS) --k $(LB_K)

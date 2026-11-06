@@ -1,0 +1,6 @@
+{
+  "weights": {
+    "cooccurrence_lb": 1.0,
+    "lb_similar_artists": 0.25
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "weights": {
+    "cooccurrence_lb": 1.0,
+    "discogs_style": 0.25
+  }
+}

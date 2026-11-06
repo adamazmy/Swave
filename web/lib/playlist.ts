@@ -82,28 +82,10 @@ export function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "playlist";
 }
 
-export function formatCount(n: number): string {
-  return new Intl.NumberFormat("en", { notation: "compact" }).format(n);
-}
-
 /** True when the Seed box holds a playlist link (Spotify, or Apple Music: the API then explains
  *  why it can't read it) rather than a search. */
 export function isPlaylistLink(s: string): boolean {
   return /open\.spotify\.com\/(?:[\w-]+\/)*playlist\/|^\s*spotify:playlist:|music\.apple\.com\/(?:[\w-]+\/)*playlist\//i.test(s);
-}
-
-/**
- * Compact reason line for a row: "appears with your seed in 6,507 shared playlists · appears with
- * your seed in 1,560 listening sessions" → "with your seed in 6,507 shared playlists · 1,560
- * listening sessions" (a later part drops its "with … in" when it repeats the first one's).
- */
-export function shortReason(reason: string): string {
-  const parts = reason.split(" · ").map((p) => p.replace(/^appears /, ""));
-  const lead = (p: string) => p.match(/^with .+? in /)?.[0];
-  const first = lead(parts[0] ?? "");
-  return parts
-    .map((p, i) => (i > 0 && first && lead(p) === first ? p.slice(first.length) : p))
-    .join(" · ");
 }
 
 /** Plain "Title - Artist" lines: what playlist-transfer tools (and Swave's own paste box) read. */

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   addSeed,
   isPlaylistLink,
-  shortReason,
   toSongList,
   mergeKept,
   parseSeeds,
@@ -104,17 +103,6 @@ describe("isPlaylistLink", () => {
     expect(isPlaylistLink("https://open.spotify.com/track/abc123")).toBe(false);
     expect(isPlaylistLink("playlist love songs")).toBe(false);
     expect(isPlaylistLink("https://music.apple.com/us/playlist/late-night/pl.u-abc123")).toBe(true);
-  });
-});
-
-describe("shortReason", () => {
-  it("drops 'appears' and a repeated 'with … in'", () => {
-    expect(shortReason("appears with your seed in 40 shared playlists · appears with your seed in 3 listening sessions"))
-      .toBe("with your seed in 40 shared playlists · 3 listening sessions");
-    expect(shortReason("appears with 2 of your 3 seeds in 9 shared playlists · appears with 1 of your 3 seeds in 4 listening sessions"))
-      .toBe("with 2 of your 3 seeds in 9 shared playlists · with 1 of your 3 seeds in 4 listening sessions");
-    expect(shortReason("appears with your seed in 7 listening sessions")).toBe("with your seed in 7 listening sessions");
-    expect(shortReason("")).toBe("");
   });
 });
 

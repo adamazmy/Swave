@@ -18,6 +18,7 @@ import { currentSession } from "@/lib/session";
 import { readSource } from "@/lib/source";
 import { clearAll, readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
 import { openTrackUrl, useProvider } from "@/lib/provider";
+import { useCovers } from "@/lib/use-covers";
 import { usePreview } from "@/lib/use-preview";
 import { Spinner, XIcon } from "./icons";
 import { Loading, Ticker } from "./night";
@@ -101,20 +102,8 @@ export default function ResultsScreen() {
            position: latest.current.list.findIndex((x) => x.track_uri === uri) }]),
   );
 
-  // Album covers, fetched in the background for songs that don't have one yet (never blocks the list).
-  const [covers, setCovers] = useState<Record<string, string | null>>({});
-  const asked = useRef(new Set<string>());
-  const coverKey = list.map((t) => t.track_uri).join(",");
-  useEffect(() => {
-    const uris = coverKey.split(",").filter((u) => u && !asked.current.has(u));
-    if (!uris.length) return;
-    uris.forEach((u) => asked.current.add(u));
-    for (let i = 0; i < uris.length; i += 100) {
-      api.covers(uris.slice(i, i + 100))
-        .then((got) => setCovers((c) => ({ ...c, ...got })))
-        .catch(() => uris.slice(i, i + 100).forEach((u) => asked.current.delete(u))); // retry on the next change
-    }
-  }, [coverKey]);
+  // Album covers, fetched in the background (never blocks the list).
+  const covers = useCovers(list.map((t) => t.track_uri));
 
   // Pre-resolve previews in the background: the top 20 whenever the list changes (all of it
   // with "Previewable only"), so play starts fast and songs without one show a link instead.

@@ -23,6 +23,7 @@ import pandas as pd
 
 from swave import lb
 from swave.config import connect
+from swave.pipeline import artist_index
 from swave.pipeline.evaluate import git_hash
 from swave.pipeline.lb_index import HOLDOUT, RUNS
 
@@ -188,6 +189,7 @@ def main() -> None:
         conn.execute("ANALYZE neighbours_lb")
         conn.execute("ANALYZE lb_tracks")
         conn.commit()
+        artist_index.build(conn)  # LB track ids changed: the related-artists lookup follows
     log(f"lb-install done: {args.run} is live, previous index kept as *_old ({stats['neighbour_rows']:,} "
         f"neighbour rows, {stats['vocab']:,} songs)", t0)
 

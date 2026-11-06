@@ -73,9 +73,11 @@ class Ranked(NamedTuple):
 
 def combine(scorers: list[tuple[Scorer, float]], seeds: np.ndarray, adventure: float | None,
             pop_of: PopLookup) -> Combined:
-    got = [(s, w, s.candidates(seeds, adventure)) for s, w in scorers]
+    # Boost scorers (getattr boost=True) add no candidates: they score the union of the others'.
+    got = [(s, w, s.candidates(seeds, adventure)) for s, w in scorers if not getattr(s, "boost", False)]
     tracks = [c.track for _, _, c in got if len(c.track)]
     track = np.unique(np.concatenate(tracks)) if tracks else np.array([], dtype=np.int64)
+    got += [(s, w, s.score_tracks(seeds, track)) for s, w in scorers if getattr(s, "boost", False)]
     base = np.zeros(len(track))
     parts: dict[str, np.ndarray] = {}
     data: dict[str, dict[str, np.ndarray]] = {}

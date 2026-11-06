@@ -1,6 +1,7 @@
 {
   "weights": {
-    "cooccurrence_mpd": 0,
-    "cooccurrence_lb": 1.0
+    "cooccurrence_mpd": 0.5,
+    "cooccurrence_lb": 0.5,
+    "related_artists": 0.25
   }
 }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Track } from "@/lib/api";
-import { formatCount, isPlaylistLink, MAX_START_SEEDS, sameSet } from "@/lib/playlist";
+import { isPlaylistLink, MAX_START_SEEDS, sameSet } from "@/lib/playlist";
 import { newSession } from "@/lib/session";
 import { writeSource, type SourcePlaylist } from "@/lib/source";
 import {
@@ -17,11 +17,12 @@ import {
   type ImportInfo,
 } from "@/lib/stored";
 import { openTrackUrl, useProvider } from "@/lib/provider";
+import { useCovers } from "@/lib/use-covers";
 import { usePreview } from "@/lib/use-preview";
 import { PlusIcon, Spinner, XIcon } from "./icons";
 import { Mosaic, Ticker } from "./night";
 import ProviderSwitch from "./provider-switch";
-import { PreviewSlot } from "./track-row";
+import { CoverButton } from "./track-row";
 
 const PASTE_EXAMPLE = ["Mr. Brightside - The Killers", "September - Earth, Wind & Fire"].join("\n");
 
@@ -450,11 +451,13 @@ function PickList({
   disabled?: boolean;
   scroll?: boolean;
 }) {
+  const covers = useCovers(tracks.map((t) => t.track_uri));
   return (
     <ul className={`overflow-hidden rounded-md border border-line bg-panel/60 ${scroll ? "max-h-80 overflow-y-auto" : ""}`}>
       {tracks.map((t) => (
         <li key={t.track_uri} className="flex items-center gap-1 border-b border-line/60 pl-3 last:border-b-0">
-          <PreviewSlot uri={t.track_uri} name={t.name} state={preview.state(t.track_uri)}
+          <CoverButton uri={t.track_uri} name={t.name} cover={covers[t.track_uri]}
+                       state={preview.state(t.track_uri)}
                        onClick={() => void preview.toggle(t.track_uri)}
                        open={{ href: openTrackUrl(provider.name, t.track_uri), label: provider.info.label }} />
           <button
@@ -467,7 +470,6 @@ function PickList({
               <p className="truncate text-sm font-semibold">{t.name}</p>
               <p className="truncate text-xs text-muted">{t.artist}</p>
             </div>
-            <span className="label shrink-0 text-dim tabular-nums">{formatCount(t.playlist_count)} playlists</span>
             <PlusIcon className="h-4 w-4 shrink-0 text-pink" />
           </button>
         </li>

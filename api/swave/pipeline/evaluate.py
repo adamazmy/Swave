@@ -28,10 +28,11 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
+import httpx
 import numpy as np
 import pandas as pd
 
-from swave import cooc, scorers
+from swave import cooc, related, scorers, styles
 from swave import recommend as rk
 from swave.config import EVAL_CSV, ROOT, connect
 
@@ -160,6 +161,11 @@ def main() -> None:
                 ext[t] = p
             pop = ext
         split = holdout_sets(conn, args.holdout, args.seeds)
+        http = httpx.Client(timeout=15.0)
+        all_seeds = np.unique(np.concatenate([s for s, _ in split.values()]))
+        for name, source in related.SCORERS.items():
+            if any(name in w for w in configs):
+                prewarm_related(conn, http, all_seeds, source)
 
         # MPD neighbour lists for every distinct (MPD) seed, same truncation as the production index.
         nb: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
@@ -179,7 +185,9 @@ def main() -> None:
             t1 = time.time()
             lookups = {"cooccurrence_mpd": scorers.from_dict(nb),
                        "cooccurrence_lb": scorers.from_db(conn, "neighbours_lb")}
-            active = [(scorers.Cooccurrence(name, lookups[name]), w) for name, w in weights.items()]
+            active = [(related.db_lookups(conn, http, name, related.SCORERS[name]) if name in related.SCORERS
+                       else styles.db_lookups(conn) if name == "discogs_style"
+                       else scorers.Cooccurrence(name, lookups[name]), w) for name, w in weights.items()]
             hits, recalls = [], []
             for seeds, hidden in split.values():
                 comb = rk.combine(active, seeds, None, lambda t: pop[t])
@@ -219,10 +227,18 @@ def eval_run(args, configs) -> None:  # noqa: ANN001
     args.holdout = f"time/{args.lb_run}"
     meta = json.loads((LB_RUNS / args.lb_run / "meta.json").read_text())
     args.k = args.lb_k or meta["config"]["k"]  # the LB run's list length (MPD lists stay --k)
+    conn = connect()  # the related-artists scorer reads the catalogue + its Deezer cache
+    http = httpx.Client(timeout=15.0)
+    all_seeds = np.unique(np.concatenate([s for s, _, _ in sets if len(s)]))
+    for name, source in related.SCORERS.items():
+        if any(name in w for w in configs):
+            prewarm_related(conn, http, all_seeds, source)
     for weights in configs:
         t1 = time.time()
         lookups = {"cooccurrence_mpd": scorers.from_dict(nb), "cooccurrence_lb": run.lookup}
-        active = [(scorers.Cooccurrence(name, lookups[name]), w) for name, w in weights.items()]
+        active = [(related.db_lookups(conn, http, name, related.SCORERS[name]) if name in related.SCORERS
+                   else styles.db_lookups(conn) if name == "discogs_style"
+                   else scorers.Cooccurrence(name, lookups[name]), w) for name, w in weights.items()]
         hits, recalls = [], []
         for seeds, hidden, n_hidden in sets:
             if len(seeds) == 0:
@@ -235,6 +251,19 @@ def eval_run(args, configs) -> None:  # noqa: ANN001
             hits.append(float(found > 0))
             recalls.append(found / n_hidden)
         report(args, weights, len(sets), hits, recalls, prep + time.time() - t1)
+
+
+def prewarm_related(conn, http, seeds: np.ndarray, source: str = "deezer") -> None:  # noqa: ANN001
+    """Fetch Deezer's related artists for every seed artist once (cached in deezer_related),
+    so the eval loop itself makes no network calls. ~2 calls per new artist, ~10/s."""
+    scorer = related.db_lookups(conn, http)
+    names = {k: n for k, n in scorer.artists_of(seeds).values() if k}
+    keys = list(names)
+    t0 = time.time()
+    for a in range(0, len(keys), 200):
+        related.related(conn, http, {k: names[k] for k in keys[a:a + 200]}, source)
+        print(f"  similar artists ({source}): {min(a + 200, len(keys)):,}/{len(keys):,} seed artists "
+              f"({time.time() - t0:.0f}s)", flush=True)
 
 
 def report(args, weights: dict[str, float], n: int, hits: list, recalls: list,  # noqa: ANN001

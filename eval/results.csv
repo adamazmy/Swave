@@ -46,3 +46,26 @@ date,git,method,k,min_co,alpha,n_eval,seeds,at,hit_rate,recall,seconds,scorers,h
 2026-11-06 04:11,7c46313-dirty,cosine,100,2,0.0,2000,5,50,0.6175,0.2151,23,cooccurrence_lb=0.5 cooccurrence_mpd=0.5,time/hist_hl1
 2026-11-06 06:01,7c46313-dirty,cosine,100,2,0.0,2000,5,50,0.6280,0.2264,27,cooccurrence_lb=1,time/hist_hl4
 2026-11-06 06:01,7c46313-dirty,cosine,100,2,0.0,2000,5,50,0.6100,0.2138,27,cooccurrence_lb=0.5 cooccurrence_mpd=0.5,time/hist_hl4
+2026-11-06 12:33,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6350,0.2278,15,cooccurrence_lb=1,time/hist_hl2
+2026-11-06 12:33,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6350,0.2275,14,cooccurrence_lb=1 min_rel=0.05,time/hist_hl2
+2026-11-06 12:33,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6345,0.2260,14,cooccurrence_lb=1 min_rel=0.1,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6270,0.2157,14,cooccurrence_lb=1 min_rel=0.2,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6175,0.2237,15,cooccurrence_lb=1 hop2=0.25 anchors=10,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6175,0.2233,14,cooccurrence_lb=1 hop2=0.25 anchors=10 min_rel=0.05,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6115,0.2203,14,cooccurrence_lb=1 hop2=0.25 anchors=10 min_rel=0.1,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5750,0.2012,14,cooccurrence_lb=1 hop2=0.25 anchors=10 min_rel=0.2,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6030,0.2201,14,cooccurrence_lb=1 hop2=0.5 anchors=10,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6015,0.2191,14,cooccurrence_lb=1 hop2=0.5 anchors=10 min_rel=0.05,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5890,0.2137,14,cooccurrence_lb=1 hop2=0.5 anchors=10 min_rel=0.1,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5430,0.1915,14,cooccurrence_lb=1 hop2=0.5 anchors=10 min_rel=0.2,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5865,0.2129,14,cooccurrence_lb=1 hop2=1 anchors=10,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5815,0.2109,14,cooccurrence_lb=1 hop2=1 anchors=10 min_rel=0.05,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5655,0.2042,14,cooccurrence_lb=1 hop2=1 anchors=10 min_rel=0.1,time/hist_hl2
+2026-11-06 12:34,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5260,0.1824,14,cooccurrence_lb=1 hop2=1 anchors=10 min_rel=0.2,time/hist_hl2
+2026-11-06 12:35,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6350,0.2278,7,cooccurrence_lb=1 hop2=0.9 anchors=10,time/hist_hl2
+2026-11-06 12:35,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6345,0.2271,7,cooccurrence_lb=1 hop2=0.9 anchors=10 min_rel=0.1,time/hist_hl2
+2026-11-06 12:35,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6295,0.2230,7,cooccurrence_lb=1 hop2=0.9 anchors=10 min_rel=0.2,time/hist_hl2
+2026-11-06 12:35,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6145,0.2164,7,cooccurrence_lb=1 hop2=0.9 anchors=10 min_rel=0.3,time/hist_hl2
+2026-11-06 14:24,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6215,0.2147,45,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 related_artists=0.15,time/hist_hl2
+2026-11-06 14:24,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.6150,0.2087,38,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 related_artists=0.25,time/hist_hl2
+2026-11-06 14:24,2dce9ca-dirty,cosine,100,2,0.0,2000,5,50,0.5940,0.1855,37,cooccurrence_lb=0.5 cooccurrence_mpd=0.5 related_artists=0.5,time/hist_hl2

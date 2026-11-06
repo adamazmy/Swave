@@ -101,4 +101,4 @@ def from_dict(nb: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]]) -> Neigh
     return lookup
 
 
-NAMES = ("cooccurrence_mpd", "cooccurrence_lb")
+NAMES = ("cooccurrence_mpd", "cooccurrence_lb", "related_artists", "lb_similar_artists", "discogs_style")

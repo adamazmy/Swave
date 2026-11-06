@@ -17,7 +17,7 @@ from fastapi.responses import RedirectResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, StringConstraints
 
-from swave import covers, itunes, lb, matching, paste, previews, providers, recommend as rk, resolve, scorers, spotify
+from swave import covers, itunes, lb, licences, related, styles, matching, paste, previews, providers, recommend as rk, resolve, scorers, spotify
 from swave.config import database_url
 from swave.recommend import MAX_ALPHA
 
@@ -207,6 +207,9 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                weights: dict[str, float] | None = None) -> FastAPI:
     # Scorer weights are read once at startup (restart the API after editing scorers.json).
     weights = weights or rk.load_weights()
+    # Public mode refuses non-commercial data at startup (licences.py); personal mode loads all.
+    licences.check([f"scorer:{n}" for n in weights] + [f"previews:{s}" for s in previews.SOURCES]
+                   + ["covers:spotify", "catalogue:mpd"])
     pool = ConnectionPool(dsn or database_url(), min_size=1, max_size=8, open=False)
     http = http or httpx.Client(timeout=10.0)
     origins = [o.strip() for o in os.environ.get(
@@ -225,6 +228,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             conn.execute(previews.SCHEMA)
             conn.execute(providers.SCHEMA)
             conn.execute(covers.SCHEMA)
+            conn.execute(related.SCHEMA)
         yield
         pool.close()
         http.close()
@@ -301,8 +305,10 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
     def scorer_set(conn) -> list[tuple[scorers.Scorer, float]]:  # noqa: ANN001
         tables = {"cooccurrence_mpd": ("neighbours", "shared playlists"),
                   "cooccurrence_lb": ("neighbours_lb", "listening sessions")}
-        return [(scorers.Cooccurrence(name, scorers.from_db(conn, tables[name][0]),
-                                      unit=tables[name][1]), w) for name, w in weights.items()]
+        return [(related.db_lookups(conn, http, name, related.SCORERS[name]) if name in related.SCORERS
+                 else styles.db_lookups(conn) if name == "discogs_style" else
+                 scorers.Cooccurrence(name, scorers.from_db(conn, tables[name][0]), unit=tables[name][1]), w)
+                for name, w in weights.items()]
 
     @app.post("/recommend", response_model=RecommendOut)
     def recommend(body: RecommendIn):

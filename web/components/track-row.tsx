@@ -1,5 +1,4 @@
 import type { Recommendation } from "@/lib/api";
-import { shortReason } from "@/lib/playlist";
 import type { PreviewInfo } from "@/lib/use-preview";
 import { Bars, ExternalIcon, PauseIcon, PlayIcon, PlusIcon, Spinner, XIcon } from "./icons";
 
@@ -44,16 +43,15 @@ export default function TrackRow(p: Props) {
         {String(p.position + 1).padStart(2, "0")}
       </span>
 
-      <PreviewSlot
+      <CoverButton
         uri={t.track_uri}
         name={t.name}
+        cover={p.cover}
         state={p.pending ? "loading" : p.preview}
         disabled={p.pending}
         onClick={p.onPreview}
         open={p.open}
       />
-
-      <Cover src={p.cover} />
 
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-2 text-sm font-semibold">
@@ -74,8 +72,7 @@ export default function TrackRow(p: Props) {
               Apple Music ↗
             </a>
           )}
-          {t.artist}
-          {t.reason && <span className="text-dim" title={t.reason}> · {shortReason(t.reason)}</span>}
+          <span title={t.reason || undefined}>{t.artist}</span>
         </p>
       </div>
 
@@ -124,85 +121,70 @@ export default function TrackRow(p: Props) {
   );
 }
 
-/** Album cover, or a blank tile while it loads / when there is none (keeps rows aligned). */
-function Cover({ src }: { src?: string | null }) {
-  return src ? (
+/** The album cover is the play button: a play icon shows on hover/focus, bars while playing.
+ *  No preview anywhere → the cover (dimmed) links to the song on the user's service instead. */
+export function CoverButton(p: {
+  uri: string;
+  name: string;
+  cover?: string | null;
+  state: PreviewState;
+  disabled?: boolean;
+  onClick: () => void;
+  open?: { href: string; label: string };
+}) {
+  const playing = p.state === "playing";
+  const unavailable = p.state === "unavailable";
+  const open = p.open ?? { href: spotifyUrl(p.uri), label: "Spotify" };
+  const base = `group relative h-10 w-10 shrink-0 overflow-hidden rounded-md border transition ${
+    playing ? "border-pink ring-2 ring-pink/40" : "border-line hover:border-pink/60"
+  } ${focus}`;
+  // the overlay: always visible while loading/playing, otherwise only on hover/focus
+  const shown = p.state === "loading" || playing;
+  const overlay = `absolute inset-0 grid place-items-center bg-ink/60 text-text transition-opacity ${
+    shown ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+  }`;
+  const art = p.cover ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt="" width={40} height={40} loading="lazy" decoding="async"
-         className="h-10 w-10 shrink-0 rounded-sm bg-raised object-cover" />
+    <img src={p.cover} alt="" width={40} height={40} loading="lazy" decoding="async"
+         className={`h-full w-full object-cover ${unavailable ? "opacity-50 grayscale" : ""}`} />
   ) : (
-    <span aria-hidden className="h-10 w-10 shrink-0 rounded-sm bg-raised" />
+    <span aria-hidden className="grid h-full w-full place-items-center bg-raised text-dim">
+      {!unavailable && <Bars className="h-3.5" />}
+    </span>
+  );
+  if (unavailable) {
+    return (
+      <a href={open.href} target="_blank" rel="noreferrer" className={base}
+         aria-label={`No preview for ${p.name}: open it in ${open.label}`}
+         title={`No preview available: open in ${open.label}`}>
+        {art}
+        <span className={overlay}><ExternalIcon className="h-3.5 w-3.5" /></span>
+      </a>
+    );
+  }
+  return (
+    <button type="button" onClick={p.onClick} disabled={p.disabled}
+            className={`${base} cursor-pointer disabled:cursor-not-allowed`}
+            aria-label={playing ? `Pause ${p.name}` : `Play preview of ${p.name}`}
+            title={playing ? "Pause" : "Play 30-second preview"}>
+      {art}
+      <span className={overlay}>
+        {p.state === "loading" ? (
+          <Spinner />
+        ) : playing ? (
+          <>
+            <Bars playing className="h-3.5 text-pink group-hover:hidden" />
+            <PauseIcon className="hidden h-4 w-4 group-hover:block" />
+          </>
+        ) : (
+          <PlayIcon className="h-4 w-4" />
+        )}
+      </span>
+    </button>
   );
 }
 
 /** Spotify page of a track (always available: every track has a Spotify URI). */
 export function spotifyUrl(uri: string): string {
   return `https://open.spotify.com/track/${uri.split(":").pop()}`;
-}
-
-/** The preview button, or, for a track with no preview anywhere, a link to open it on the
- *  user's service (`open`; Spotify by default). */
-export function PreviewSlot(p: {
-  uri: string;
-  name: string;
-  state: PreviewState;
-  disabled?: boolean;
-  onClick: () => void;
-  open?: { href: string; label: string };
-}) {
-  const open = p.open ?? { href: spotifyUrl(p.uri), label: "Spotify" };
-  if (p.state !== "unavailable") return <PreviewButton name={p.name} state={p.state} disabled={p.disabled} onClick={p.onClick} />;
-  return (
-    <a
-      href={open.href}
-      target="_blank"
-      rel="noreferrer"
-      className={`grid h-9 w-9 shrink-0 place-items-center rounded-md border border-dashed border-line text-dim transition hover:border-pink/60 hover:text-pink ${focus}`}
-      aria-label={`No preview for ${p.name}: open it in ${open.label}`}
-      title={`No preview available: open in ${open.label}`}
-    >
-      <ExternalIcon className="h-3.5 w-3.5" />
-    </a>
-  );
-}
-
-/** Square preview button: level bars at rest (a play icon on hover), bouncing bars while playing. */
-export function PreviewButton({
-  name,
-  state,
-  disabled = false,
-  onClick,
-}: {
-  name: string;
-  state: PreviewState;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  const playing = state === "playing";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={state === "unavailable" || disabled}
-      className={`group grid h-9 w-9 shrink-0 place-items-center rounded-md border transition ${
-        playing ? "border-pink bg-pink/15 text-pink" : "border-line bg-panel text-pink-soft hover:border-pink/60"
-      } disabled:cursor-not-allowed disabled:border-line/50 disabled:text-dim/60 ${focus}`}
-      aria-label={playing ? `Pause ${name}` : `Play preview of ${name}`}
-      title={state === "unavailable" ? "No preview available" : "30-second preview"}
-    >
-      {state === "loading" ? (
-        <Spinner />
-      ) : playing ? (
-        <>
-          <Bars playing className="h-3.5 group-hover:hidden" />
-          <PauseIcon className="hidden h-3.5 w-3.5 group-hover:block" />
-        </>
-      ) : (
-        <>
-          <Bars className="h-3.5 group-hover:hidden group-disabled:block" />
-          <PlayIcon className="hidden h-3.5 w-3.5 group-hover:block group-disabled:hidden" />
-        </>
-      )}
-    </button>
-  );
 }

@@ -91,3 +91,13 @@ def by_isrc(client: httpx.Client, isrc: str) -> dict | None:
 def search_raw(client: httpx.Client, q: str, limit: int = 15) -> list[dict]:
     """Search results as Deezer returns them (each has id, title, artist.name, duration, preview)."""
     return _get(client, "/search", q=q, limit=limit).get("data", [])
+
+
+def search_artists(client: httpx.Client, name: str, limit: int = 5) -> list[dict]:
+    """Artist search results (each has id, name, nb_fan)."""
+    return _get(client, "/search/artist", q=name, limit=limit).get("data", [])
+
+
+def related_artists(client: httpx.Client, artist_id: int, limit: int = 20) -> list[dict]:
+    """Deezer's "related artists" for an artist id, most related first (each has id, name)."""
+    return _get(client, f"/artist/{artist_id}/related", limit=limit).get("data", [])
