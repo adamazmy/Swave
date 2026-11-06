@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS preview_attempts (
     steps      text                   -- e.g. "deezer:expired_url>deezer:ok"
 );
 CREATE INDEX IF NOT EXISTS preview_attempts_ts ON preview_attempts (ts);
+ALTER TABLE preview_attempts ADD COLUMN IF NOT EXISTS user_id text;  -- per user (private deployment)
 -- v1-v3 cached Deezer matches carry over (their old misses are re-tried with the new chain).
 DO $$ BEGIN
   IF to_regclass('previews') IS NOT NULL THEN
@@ -176,7 +177,7 @@ def meta(conn: psycopg.Connection, http: httpx.Client, track_uri: str) -> Meta:
         return Meta(row[0], row[1], cached[0], cached[1])
     isrc = duration = None
     try:
-        r = spotify.call(conn, http, "GET", f"/tracks/{track_uri.rsplit(':', 1)[1]}").json()
+        r = spotify.call(conn, http, spotify.ANY, "GET", f"/tracks/{track_uri.rsplit(':', 1)[1]}").json()
         isrc, duration = (r.get("external_ids") or {}).get("isrc"), r.get("duration_ms")
     except spotify.SpotifyError as e:
         if e.status != 404:
@@ -392,9 +393,9 @@ def resolve_all(conn: psycopg.Connection, http: httpx.Client, track_uri: str, wa
 
 
 def log_attempt(conn: psycopg.Connection, session_id: str | None, track_uri: str, outcome: str,
-                source: str | None, steps: str | None) -> None:
-    conn.execute("INSERT INTO preview_attempts (session_id, track_uri, outcome, source, steps) "
-                 "VALUES (%s, %s, %s, %s, %s)", (session_id, track_uri, outcome, source, steps))
+                source: str | None, steps: str | None, user_id: str | None = None) -> None:
+    conn.execute("INSERT INTO preview_attempts (session_id, track_uri, outcome, source, steps, user_id) "
+                 "VALUES (%s, %s, %s, %s, %s, %s)", (session_id, track_uri, outcome, source, steps, user_id))
 
 
 def coverage(conn: psycopg.Connection, days: int = 7) -> dict:

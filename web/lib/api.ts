@@ -84,6 +84,15 @@ export type PreviewResult = {
   outcome: Exclude<PreviewOutcome, "expired_url" | "playback_error">;
   open_url: string | null; // the track at `source` (Apple Music link for iTunes previews)
 };
+export type MyData = {
+  user: string; // your Cloudflare Access email ("local" when running on your own machine)
+  events: number;
+  first_event: string | null;
+  last_event: string | null;
+  preview_attempts: number;
+  spotify_connected: boolean;
+  spotify_name: string | null;
+};
 export type PreviewAvailability = {
   status: "yes" | "no" | "unknown";
   source: PreviewSource | null;
@@ -202,6 +211,12 @@ export const api = {
 
   /** Music services and what Swave can do with each. */
   providers: () => request<ProviderInfo[]>("/providers"),
+
+  /** Who you are and what Swave keeps about you (the "What Swave stores" page). */
+  me: () => request<MyData>("/me"),
+  /** Delete your events, preview attempts and Spotify login on the server. */
+  deleteMyData: () =>
+    request<{ deleted: Record<string, number> }>("/me/data", { method: "DELETE" }),
 
   /** Link that redirects to the track on a service (or a search there). */
   openUrl: (provider: string, trackUri: string) =>

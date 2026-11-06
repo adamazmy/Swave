@@ -91,7 +91,7 @@ def labs(dsn, monkeypatch):
     lab = Labs()
     searches: list[tuple[str, str]] = []
 
-    def fake_search(conn, http, title, artist):
+    def fake_search(conn, http, user, title, artist):
         searches.append((title, artist))
         return None  # Spotify knows none of the made-up songs
 

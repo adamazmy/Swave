@@ -1,6 +1,9 @@
 """Spotify Web API in development mode (rules since Feb 2026), single user.
 
-- Auth: Authorization Code + PKCE (no client secret). Tokens live in `spotify_auth` (one row).
+- Auth: Authorization Code + PKCE (no client secret). Tokens live in `spotify_auth`, one row per
+  user (the Cloudflare Access email in the private deployment, `access.LOCAL_USER` locally).
+  Calls that only read public catalogue data (ISRC lookups, track search) pass `ANY`: they use
+  whichever account is connected.
 - Save: POST /me/playlists, then POST /playlists/{id}/items in batches of 100.
 - Read a pasted playlist: GET /playlists/{id}/items (owned or collaborative playlists only),
   track under items[].item (items[].track is deprecated).
@@ -30,14 +33,27 @@ PLAYLIST_ID = re.compile(r"playlist[/:]([A-Za-z0-9]{22})")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS spotify_auth (
-    id            int PRIMARY KEY CHECK (id = 1),
+    user_id       text PRIMARY KEY,
     access_token  text NOT NULL,
     refresh_token text NOT NULL,
     expires_at    timestamptz NOT NULL,
     display_name  text
 );
 ALTER TABLE spotify_auth ADD COLUMN IF NOT EXISTS scope text;  -- granted scopes (space-separated)
+-- v1–v7 had one row keyed by id = 1: re-key it to the local user (idempotent)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'spotify_auth' AND column_name = 'id') THEN
+    ALTER TABLE spotify_auth ADD COLUMN IF NOT EXISTS user_id text;
+    UPDATE spotify_auth SET user_id = 'local' WHERE user_id IS NULL;
+    ALTER TABLE spotify_auth DROP CONSTRAINT IF EXISTS spotify_auth_pkey;
+    ALTER TABLE spotify_auth DROP COLUMN id;
+    ALTER TABLE spotify_auth ALTER COLUMN user_id SET NOT NULL;
+    ALTER TABLE spotify_auth ADD PRIMARY KEY (user_id);
+  END IF;
+END $$;
 """
+ANY = None  # user for public catalogue lookups: any connected account
 
 
 class SpotifyError(Exception):
@@ -102,18 +118,18 @@ def _token(http: httpx.Client, data: dict) -> dict:
     return r.json()
 
 
-def _store(conn: psycopg.Connection, tok: dict, display_name: str | None = None) -> None:
+def _store(conn: psycopg.Connection, user: str, tok: dict, display_name: str | None = None) -> None:
     """Upsert tokens. Spotify may omit refresh_token on refresh: keep the old one then."""
     conn.execute(
-        """INSERT INTO spotify_auth (id, access_token, refresh_token, expires_at, display_name, scope)
-           VALUES (1, %(a)s, %(r)s, now() + make_interval(secs => %(e)s), %(d)s, %(s)s)
-           ON CONFLICT (id) DO UPDATE SET
+        """INSERT INTO spotify_auth (user_id, access_token, refresh_token, expires_at, display_name, scope)
+           VALUES (%(u)s, %(a)s, %(r)s, now() + make_interval(secs => %(e)s), %(d)s, %(s)s)
+           ON CONFLICT (user_id) DO UPDATE SET
                access_token  = EXCLUDED.access_token,
                refresh_token = COALESCE(NULLIF(%(r)s, ''), spotify_auth.refresh_token),
                expires_at    = EXCLUDED.expires_at,
                display_name  = COALESCE(EXCLUDED.display_name, spotify_auth.display_name),
                scope         = COALESCE(EXCLUDED.scope, spotify_auth.scope)""",
-        {"a": tok["access_token"], "r": tok.get("refresh_token") or "",
+        {"u": user, "a": tok["access_token"], "r": tok.get("refresh_token") or "",
          "e": max(0, int(tok.get("expires_in", 3600)) - 60), "d": display_name,
          "s": tok.get("scope")},
     )
@@ -121,7 +137,7 @@ def _store(conn: psycopg.Connection, tok: dict, display_name: str | None = None)
     conn.commit()
 
 
-def connect(conn: psycopg.Connection, http: httpx.Client, code: str, verifier: str) -> str:
+def connect(conn: psycopg.Connection, http: httpx.Client, user: str | None, code: str, verifier: str) -> str:
     """Exchange the authorization code, store tokens, return the account's display name."""
     tok = _token(http, {
         "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri(),
@@ -129,33 +145,39 @@ def connect(conn: psycopg.Connection, http: httpx.Client, code: str, verifier: s
     })
     if not tok.get("refresh_token"):
         raise SpotifyError(502, "Spotify returned no refresh token")
-    _store(conn, tok)
-    me = call(conn, http, "GET", "/me").json()
+    _store(conn, user, tok)
+    me = call(conn, http, user, "GET", "/me").json()
     name = me.get("display_name") or me.get("id") or "Spotify user"
-    conn.execute("UPDATE spotify_auth SET display_name = %s WHERE id = 1", (name,))
+    conn.execute("UPDATE spotify_auth SET display_name = %s WHERE user_id = %s", (name, user))
     return name
 
 
-def status(conn: psycopg.Connection) -> tuple[str, bool] | None:
+def status(conn: psycopg.Connection, user: str | None) -> tuple[str, bool] | None:
     """(display name, cover uploads allowed) or None when not connected."""
-    row = conn.execute("SELECT display_name, scope FROM spotify_auth WHERE id = 1").fetchone()
+    row = conn.execute("SELECT display_name, scope FROM spotify_auth WHERE user_id = %s", (user,)).fetchone()
     if not row:
         return None
     return row[0] or "Spotify user", COVER_SCOPE in (row[1] or "").split()
 
 
-def disconnect(conn: psycopg.Connection) -> None:
-    conn.execute("DELETE FROM spotify_auth")
+def disconnect(conn: psycopg.Connection, user: str | None) -> None:
+    if user is ANY:
+        return  # a shared lookup's token failed: nobody is logged out
+    conn.execute("DELETE FROM spotify_auth WHERE user_id = %s", (user,))
     conn.commit()  # persists even when the caller then raises
 
 
-def access_token(conn: psycopg.Connection, http: httpx.Client) -> str:
-    row = conn.execute(
-        "SELECT access_token, refresh_token, expires_at > now() FROM spotify_auth WHERE id = 1"
-    ).fetchone()
+def access_token(conn: psycopg.Connection, http: httpx.Client, user: str | None) -> str:
+    if user is ANY:  # public catalogue lookups: the account whose token is freshest
+        row = conn.execute("""SELECT access_token, refresh_token, expires_at > now(), user_id
+                              FROM spotify_auth ORDER BY expires_at DESC LIMIT 1""").fetchone()
+    else:
+        row = conn.execute("""SELECT access_token, refresh_token, expires_at > now(), user_id
+                              FROM spotify_auth WHERE user_id = %s""", (user,)).fetchone()
     if not row:
         raise NotConnected
-    access, refresh, valid = row
+    access, refresh, valid, owner = row
+    user = owner  # refresh and store under the token's real owner
     if valid:
         return access
     try:
@@ -163,51 +185,51 @@ def access_token(conn: psycopg.Connection, http: httpx.Client) -> str:
                             "client_id": client_id()})
     except SpotifyError as e:
         if e.status in (400, 401):  # revoked / invalid_grant: log in again
-            disconnect(conn)
+            disconnect(conn, user)
             raise NotConnected from e
         raise
-    _store(conn, tok)
+    _store(conn, user, tok)
     return tok["access_token"]
 
 
-def call(conn: psycopg.Connection, http: httpx.Client, method: str, path: str, **kw) -> httpx.Response:
-    token = access_token(conn, http)
+def call(conn: psycopg.Connection, http: httpx.Client, user: str | None, method: str, path: str, **kw) -> httpx.Response:
+    token = access_token(conn, http, user)
     headers = {"Authorization": f"Bearer {token}", **kw.pop("headers", {})}
     try:
         r = http.request(method, f"{API}{path}", headers=headers, **kw)
     except httpx.HTTPError as e:
         raise SpotifyError(502, f"Can't reach Spotify: {e}") from e
     if r.status_code == 401:
-        disconnect(conn)
+        disconnect(conn, user)
         raise NotConnected
     if r.status_code >= 400:
         raise SpotifyError(r.status_code, _message(r))
     return r
 
 
-def create_playlist(conn: psycopg.Connection, http: httpx.Client, name: str, description: str,
+def create_playlist(conn: psycopg.Connection, http: httpx.Client, user: str | None, name: str, description: str,
                     uris: list[str], public: bool = False) -> dict:
     """New playlist with `uris` in order. Returns {id, url, added}."""
-    pl = call(conn, http, "POST", "/me/playlists",
+    pl = call(conn, http, user, "POST", "/me/playlists",
               json={"name": name, "description": description, "public": public}).json()
     for i in range(0, len(uris), BATCH):
-        call(conn, http, "POST", f"/playlists/{pl['id']}/items", json={"uris": uris[i:i + BATCH]})
+        call(conn, http, user, "POST", f"/playlists/{pl['id']}/items", json={"uris": uris[i:i + BATCH]})
     return {"id": pl["id"], "url": pl.get("external_urls", {}).get("spotify"), "added": len(uris)}
 
 
-def update_playlist(conn: psycopg.Connection, http: httpx.Client, playlist_id: str, name: str,
+def update_playlist(conn: psycopg.Connection, http: httpx.Client, user: str | None, playlist_id: str, name: str,
                     description: str, uris: list[str], public: bool = False) -> dict:
     """Update details and replace the songs with `uris` (first 100 via PUT, rest via POST)."""
-    call(conn, http, "PUT", f"/playlists/{playlist_id}",
+    call(conn, http, user, "PUT", f"/playlists/{playlist_id}",
          json={"name": name, "description": description, "public": public})
-    call(conn, http, "PUT", f"/playlists/{playlist_id}/items", json={"uris": uris[:BATCH]})
+    call(conn, http, user, "PUT", f"/playlists/{playlist_id}/items", json={"uris": uris[:BATCH]})
     for i in range(BATCH, len(uris), BATCH):
-        call(conn, http, "POST", f"/playlists/{playlist_id}/items", json={"uris": uris[i:i + BATCH]})
+        call(conn, http, user, "POST", f"/playlists/{playlist_id}/items", json={"uris": uris[i:i + BATCH]})
     return {"id": playlist_id, "url": f"https://open.spotify.com/playlist/{playlist_id}",
             "added": len(uris)}
 
 
-def add_new_items(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
+def add_new_items(conn: psycopg.Connection, http: httpx.Client, user: str | None, playlist_id: str,
                   uris: list[str], keys: dict[str, tuple[str, str]] | None = None) -> dict:
     """Append the `uris` that aren't in the playlist yet; existing songs are never touched.
 
@@ -216,26 +238,26 @@ def add_new_items(conn: psycopg.Connection, http: httpx.Client, playlist_id: str
     """
     from swave.matching import song_key  # local import keeps spotify.py free of DB matching
 
-    items = playlist_items(conn, http, playlist_id, cap=10_000)
+    items = playlist_items(conn, http, user, playlist_id, cap=10_000)
     existing = {i["uri"] for i in items}
     existing_keys = {song_key(i["name"], a) for i in items for a in i["artists"]}
     keys = keys or {}
     new = [u for u in dict.fromkeys(uris)
            if u not in existing and keys.get(u) not in existing_keys]
     for i in range(0, len(new), BATCH):
-        call(conn, http, "POST", f"/playlists/{playlist_id}/items", json={"uris": new[i:i + BATCH]})
+        call(conn, http, user, "POST", f"/playlists/{playlist_id}/items", json={"uris": new[i:i + BATCH]})
     return {"id": playlist_id, "url": f"https://open.spotify.com/playlist/{playlist_id}",
             "added": len(new), "skipped": len(set(uris)) - len(new)}
 
 
-def upload_cover(conn: psycopg.Connection, http: httpx.Client, playlist_id: str, jpeg_b64: str) -> None:
+def upload_cover(conn: psycopg.Connection, http: httpx.Client, user: str | None, playlist_id: str, jpeg_b64: str) -> None:
     """Set a custom cover: base64 JPEG body (max 256 KB), needs the ugc-image-upload scope."""
-    call(conn, http, "PUT", f"/playlists/{playlist_id}/images", content=jpeg_b64.encode(),
+    call(conn, http, user, "PUT", f"/playlists/{playlist_id}/images", content=jpeg_b64.encode(),
          headers={"Content-Type": "image/jpeg"})
 
 
-def playlist_name(conn: psycopg.Connection, http: httpx.Client, playlist_id: str) -> str:
-    return call(conn, http, "GET", f"/playlists/{playlist_id}", params={"fields": "name"}).json().get("name") or "your playlist"
+def playlist_name(conn: psycopg.Connection, http: httpx.Client, user: str | None, playlist_id: str) -> str:
+    return call(conn, http, user, "GET", f"/playlists/{playlist_id}", params={"fields": "name"}).json().get("name") or "your playlist"
 
 
 def parse_playlist_id(text: str) -> str | None:
@@ -244,14 +266,14 @@ def parse_playlist_id(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def playlist_items(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
+def playlist_items(conn: psycopg.Connection, http: httpx.Client, user: str | None, playlist_id: str,
                    cap: int = 500) -> list[dict]:
     """Songs of one of the user's own/collaborative playlists, in order (max `cap`):
     [{"uri", "name", "artists": [...]}]. Episodes and local files are skipped."""
     out: list[dict] = []
     offset = 0
     while len(out) < cap:
-        page = call(conn, http, "GET", f"/playlists/{playlist_id}/items",
+        page = call(conn, http, user, "GET", f"/playlists/{playlist_id}/items",
                     params={"limit": 50, "offset": offset, "additional_types": "track",
                             "fields": "items(item(uri,name,artists(name))),next"}).json()
         items = page.get("items", [])
@@ -266,17 +288,17 @@ def playlist_items(conn: psycopg.Connection, http: httpx.Client, playlist_id: st
     return out[:cap]
 
 
-def playlist_track_uris(conn: psycopg.Connection, http: httpx.Client, playlist_id: str,
+def playlist_track_uris(conn: psycopg.Connection, http: httpx.Client, user: str | None, playlist_id: str,
                         cap: int = 500) -> list[str]:
-    return [i["uri"] for i in playlist_items(conn, http, playlist_id, cap)]
+    return [i["uri"] for i in playlist_items(conn, http, user, playlist_id, cap)]
 
 
-def search_track(conn: psycopg.Connection, http: httpx.Client, title: str, artist: str) -> str | None:
+def search_track(conn: psycopg.Connection, http: httpx.Client, user: str | None, title: str, artist: str) -> str | None:
     """Spotify URI of `artist – title` via search (limit 10, dev-mode max), checked with the same
     artist/title rules as Deezer matching; None if no candidate passes."""
     from swave.deezer import pick  # local import: deezer doesn't depend on spotify
 
-    r = call(conn, http, "GET", "/search",
+    r = call(conn, http, user, "GET", "/search",
              params={"q": f"{artist} {title}", "type": "track", "limit": 10}).json()
     items = r.get("tracks", {}).get("items", [])
     cands = [{"title": t["name"], "artist": {"name": a["name"]}, "uri": t["uri"]}

@@ -11,13 +11,16 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 import numpy as np
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse, RedirectResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field, StringConstraints
 
-from swave import covers, itunes, lb, licences, related, styles, matching, paste, previews, providers, recommend as rk, resolve, scorers, spotify
+from swave import (access, covers, itunes, lb, licences, matching, paste, previews, providers, related,
+                   resolve, scorers, spotify, styles)
+from swave import recommend as rk
 from swave.config import database_url
 from swave.recommend import MAX_ALPHA
 
@@ -40,6 +43,9 @@ CREATE TABLE IF NOT EXISTS events (
     slider     real
 );
 CREATE INDEX IF NOT EXISTS events_ts ON events (ts);
+-- per-user since the private deployment (Cloudflare Access email; 'local' in development)
+ALTER TABLE events ADD COLUMN IF NOT EXISTS user_id text;
+CREATE INDEX IF NOT EXISTS events_user ON events (user_id);
 ALTER TABLE events DROP CONSTRAINT IF EXISTS events_action_check;
 ALTER TABLE events ADD CONSTRAINT events_action_check
     CHECK (action IN ({", ".join(f"'{a}'" for a in ACTIONS)}));
@@ -204,18 +210,23 @@ def with_param(url: str, **params: str) -> str:
 
 
 def create_app(dsn: str | None = None, http: httpx.Client | None = None,
-               weights: dict[str, float] | None = None) -> FastAPI:
+               weights: dict[str, float] | None = None,
+               verifier: access.Verifier | None = None) -> FastAPI:
     # Scorer weights are read once at startup (restart the API after editing scorers.json).
     weights = weights or rk.load_weights()
     # Public mode refuses non-commercial data at startup (licences.py); personal mode loads all.
     licences.check([f"scorer:{n}" for n in weights] + [f"previews:{s}" for s in previews.SOURCES]
                    + ["covers:spotify", "catalogue:mpd"])
+    # Who is calling: the verified Cloudflare Access email, or the single local user (access.py).
+    if verifier is None:
+        cfg = access.config_from_env()
+        verifier = access.Verifier(cfg) if cfg else None
     pool = ConnectionPool(dsn or database_url(), min_size=1, max_size=8, open=False)
     http = http or httpx.Client(timeout=10.0)
     origins = [o.strip() for o in os.environ.get(
         "WEB_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
-    # OAuth state -> (code_verifier, return_to, created). In memory: single user, 10 min TTL.
-    pending: dict[str, tuple[str, str, float]] = {}
+    # OAuth state -> (code_verifier, return_to, created, user). In memory, 10 min TTL.
+    pending: dict[str, tuple[str, str, float, str]] = {}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -237,9 +248,31 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Content-Type"],
     )
+
+    @app.middleware("http")
+    async def identify(request: Request, call_next):
+        """request.state.user = the verified Cloudflare Access email (403 without a valid token),
+        or access.LOCAL_USER when Access isn't configured (local development)."""
+        path = request.scope["path"]
+        root = request.scope.get("root_path", "")
+        if root and path.startswith(root):
+            path = path[len(root):]
+        if verifier is None:
+            request.state.user = access.LOCAL_USER
+        elif path in access.OPEN_PATHS or request.method == "OPTIONS":
+            request.state.user = None
+        else:
+            try:
+                request.state.user = await run_in_threadpool(verifier.email, request.headers.get(access.HEADER))
+            except access.AccessError as e:
+                return JSONResponse({"detail": str(e)}, status_code=403)
+        return await call_next(request)
+
+    def user_of(request: Request) -> str:
+        return request.state.user
 
     def safe_return(url: str | None) -> str:
         """Only redirect back to the web app's own origins (no open redirect)."""
@@ -410,22 +443,23 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                 break
         return RecommendOut(results=results, seeds=seeds, unknown_seeds=unknown, alpha=alpha)
 
-    insert_event = """INSERT INTO events (session_id, action, track_uri, position, slider)
-                      VALUES (%s, %s, %s, %s, %s)"""
+    insert_event = """INSERT INTO events (session_id, action, track_uri, position, slider, user_id)
+                      VALUES (%s, %s, %s, %s, %s, %s)"""
 
-    def row(ev: EventIn) -> tuple:
-        return (ev.session_id, ev.action, ev.track_uri, ev.position, ev.slider)
+    def row(ev: EventIn, user: str) -> tuple:
+        return (ev.session_id, ev.action, ev.track_uri, ev.position, ev.slider, user)
 
     @app.post("/events", status_code=201)
-    def log_event(ev: EventIn) -> dict:
+    def log_event(ev: EventIn, request: Request) -> dict:
         with pool.connection() as conn:
-            (event_id,) = conn.execute(insert_event + " RETURNING id", row(ev)).fetchone()
+            (event_id,) = conn.execute(insert_event + " RETURNING id", row(ev, user_of(request))).fetchone()
         return {"id": event_id}
 
     @app.post("/events/batch", status_code=201)
-    def log_events(evs: list[EventIn] = Body(min_length=1, max_length=200)) -> dict:
+    def log_events(request: Request, evs: list[EventIn] = Body(min_length=1, max_length=200)) -> dict:
+        user = user_of(request)
         with pool.connection() as conn, conn.cursor() as cur:
-            cur.executemany(insert_event, [row(e) for e in evs])
+            cur.executemany(insert_event, [row(e, user) for e in evs])
         return {"logged": len(evs)}
 
     @app.get("/preview", response_model=PreviewOut)
@@ -453,17 +487,45 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
         return previews.prefetch(pool, http, body.track_uris)
 
     @app.post("/preview/attempts", status_code=201)
-    def preview_attempt(a: PreviewAttemptIn) -> dict:
+    def preview_attempt(a: PreviewAttemptIn, request: Request) -> dict:
         with pool.connection() as conn:
-            previews.log_attempt(conn, a.session_id, a.track_uri, a.outcome, a.source, a.steps)
+            previews.log_attempt(conn, a.session_id, a.track_uri, a.outcome, a.source, a.steps,
+                                 user_of(request))
         return {"logged": 1}
+
+    # ── Your data ("What Swave stores" page) ─────────────────────────────────────────────────
+
+    @app.get("/me")
+    def me(request: Request) -> dict:
+        """Who you are and what Swave keeps about you (personal rows only)."""
+        user = user_of(request)
+        with pool.connection() as conn:
+            events = conn.execute("SELECT count(*), min(ts), max(ts) FROM events WHERE user_id = %s",
+                                  (user,)).fetchone()
+            attempts = conn.execute("SELECT count(*) FROM preview_attempts WHERE user_id = %s",
+                                    (user,)).fetchone()[0]
+            st = spotify.status(conn, user)
+        return {"user": user, "events": events[0], "first_event": events[1], "last_event": events[2],
+                "preview_attempts": attempts, "spotify_connected": st is not None,
+                "spotify_name": st[0] if st else None}
+
+    @app.delete("/me/data")
+    def delete_my_data(request: Request) -> dict:
+        """Delete every row Swave keeps about you: events, preview attempts, Spotify login.
+        Shared caches (covers, preview matches, related artists) hold no personal data."""
+        user = user_of(request)
+        with pool.connection() as conn:
+            ev = conn.execute("DELETE FROM events WHERE user_id = %s", (user,)).rowcount
+            pa = conn.execute("DELETE FROM preview_attempts WHERE user_id = %s", (user,)).rowcount
+            sp = conn.execute("DELETE FROM spotify_auth WHERE user_id = %s", (user,)).rowcount
+        return {"deleted": {"events": ev, "preview_attempts": pa, "spotify_login": sp}}
 
     # ── Spotify ──────────────────────────────────────────────────────────────────────────────
 
     @app.get("/auth/login")
-    def auth_login(return_to: str | None = None):
+    def auth_login(request: Request, return_to: str | None = None):
         now = time.time()
-        for s in [s for s, (_, _, t) in pending.items() if now - t > 600]:
+        for s in [s for s, (_, _, t, _) in pending.items() if now - t > 600]:
             del pending[s]
         verifier, challenge = spotify.pkce_pair()
         state = secrets.token_urlsafe(24)
@@ -471,49 +533,53 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             url = spotify.authorize_url(state, challenge)
         except spotify.SpotifyError as e:
             raise HTTPException(503, e.message) from None
-        pending[state] = (verifier, safe_return(return_to), now)
+        pending[state] = (verifier, safe_return(return_to), now, user_of(request))
         return RedirectResponse(url, status_code=302)
 
     @app.get("/auth/callback")
-    def auth_callback(state: str = "", code: str | None = None, error: str | None = None):
+    def auth_callback(request: Request, state: str = "", code: str | None = None, error: str | None = None):
         entry = pending.pop(state, None)
-        if entry is None:
+        if entry is None or entry[3] != user_of(request):  # the login must finish as the user who started it
             return RedirectResponse(with_param(safe_return(None), spotify_error="Login expired, try again"), 302)
-        verifier, back, _ = entry
+        code_verifier, back, _, user = entry
         if error or not code:
             return RedirectResponse(with_param(back, spotify_error=error or "Login cancelled"), 302)
         try:
             with pool.connection() as conn:
-                spotify.connect(conn, http, code, verifier)
+                spotify.connect(conn, http, user, code, code_verifier)
         except (spotify.SpotifyError, spotify.NotConnected) as e:
             msg = e.message if isinstance(e, spotify.SpotifyError) else "Login failed"
+            if isinstance(e, spotify.SpotifyError) and e.status == 403:
+                msg = ("Your Spotify account isn't on this app's allowlist yet: use Copy for Spotify, "
+                       "the CSV or the song links instead, or ask the owner to add you")
             return RedirectResponse(with_param(back, spotify_error=msg), 302)
         return RedirectResponse(with_param(back, spotify="connected"), 302)
 
     @app.get("/auth/status", response_model=AuthStatus)
-    def auth_status():
+    def auth_status(request: Request):
         with pool.connection() as conn:
-            st = spotify.status(conn)
+            st = spotify.status(conn, user_of(request))
         return AuthStatus(configured=bool(os.environ.get("SPOTIFY_CLIENT_ID", "").strip()),
                           connected=st is not None, display_name=st[0] if st else None,
                           can_upload_cover=bool(st and st[1]))
 
     @app.post("/auth/logout", status_code=204)
-    def auth_logout():
+    def auth_logout(request: Request):
         with pool.connection() as conn:
-            spotify.disconnect(conn)
+            spotify.disconnect(conn, user_of(request))
 
     @app.post("/save", response_model=SaveOut, status_code=201)
-    def save(body: SaveIn):
+    def save(body: SaveIn, request: Request):
+        user = user_of(request)
         uris = list(dict.fromkeys(body.track_uris))  # dedupe, keep order
         with pool.connection() as conn:
             try:
                 if body.playlist_id:
                     out = SaveOut(**spotify.update_playlist(
-                        conn, http, body.playlist_id, body.name, body.description, uris, body.public))
+                        conn, http, user, body.playlist_id, body.name, body.description, uris, body.public))
                 else:
                     out = SaveOut(**spotify.create_playlist(
-                        conn, http, body.name, body.description, uris, body.public))
+                        conn, http, user, body.name, body.description, uris, body.public))
             except spotify.SpotifyError as e:
                 if body.playlist_id and e.status == 404:
                     raise HTTPException(404, "That playlist no longer exists; save it as new") from None
@@ -522,7 +588,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                 raise http_error(e) from None
             if body.cover_jpeg:
                 try:
-                    spotify.upload_cover(conn, http, out.id, body.cover_jpeg)
+                    spotify.upload_cover(conn, http, user, out.id, body.cover_jpeg)
                 except spotify.SpotifyError as e:
                     out.cover_error = ("Reconnect Spotify to allow cover uploads" if e.status in (401, 403)
                                        else f"Cover upload failed: {e.message}")
@@ -532,14 +598,15 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
 
     @app.post("/playlists/{playlist_id}/add", response_model=AddOut, status_code=201)
     def add_to_playlist(playlist_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9]{22}$")],
-                        body: AddIn):
+                        body: AddIn, request: Request):
         """Append kept songs to one of your playlists, skipping songs already in it."""
         with pool.connection() as conn:
             keys = {r[0]: matching.song_key(r[1], r[2]) for r in conn.execute(
                 "SELECT track_uri, name, artist FROM tracks WHERE track_uri = ANY(%s)",
                 (body.track_uris,)).fetchall()}
             try:
-                return AddOut(**spotify.add_new_items(conn, http, playlist_id, body.track_uris, keys))
+                return AddOut(**spotify.add_new_items(conn, http, user_of(request), playlist_id,
+                                                      body.track_uris, keys))
             except spotify.SpotifyError as e:
                 if e.status in (403, 404):
                     raise HTTPException(403, "Spotify only lets Swave change playlists you own or "
@@ -549,10 +616,10 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                 raise http_error(e) from None
 
     @app.post("/import", response_model=ImportOut)
-    def import_playlist(body: ImportIn):
+    def import_playlist(body: ImportIn, request: Request):
         if "music.apple.com" in body.url or "itunes.apple.com" in body.url:
             try:  # capability check: the Apple adapter can't read playlists (no MusicKit)
-                providers.PROVIDERS["apple"].read_playlist(None, http, body.url)
+                providers.PROVIDERS["apple"].read_playlist(None, http, user_of(request), body.url)
             except providers.Unsupported as e:
                 raise HTTPException(422, str(e)) from None
         pid = spotify.parse_playlist_id(body.url)
@@ -560,8 +627,8 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             raise HTTPException(422, "That doesn't look like a Spotify playlist link")
         with pool.connection() as conn:
             try:
-                items = spotify.playlist_items(conn, http, pid)
-                name = spotify.playlist_name(conn, http, pid)
+                items = spotify.playlist_items(conn, http, user_of(request), pid)
+                name = spotify.playlist_name(conn, http, user_of(request), pid)
             except spotify.SpotifyError as e:
                 if e.status in (403, 404):  # dev mode: only playlists you own or collaborate on
                     raise HTTPException(403, "Spotify only lets Swave read playlists you own or "

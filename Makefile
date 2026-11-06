@@ -12,7 +12,9 @@ K ?= 200
 MIN_CO ?= 2
 ALPHA ?= 0
 
-.PHONY: setup db ingest build-index lb-ingest lb-names lb-index lb-install artist-index discogs-styles lb-build lb-report eval api web dev feedback test preview-report preview-bench
+PRIVATE = docker compose -f docker-compose.yml -f docker-compose.private.yml --env-file .env.private
+
+.PHONY: private-up private-down private-logs private-update backup setup db ingest build-index lb-ingest lb-names lb-index lb-install artist-index discogs-styles lb-build lb-report eval api web dev feedback test preview-report preview-bench
 
 WEEKS ?= 8
 DAYS ?= 7
@@ -91,3 +93,19 @@ test: db            ## API/pipeline tests + web typecheck, lint, unit tests (syn
 	npm --prefix web run typecheck
 	npm --prefix web run lint
 	npm --prefix web test
+
+# ── Private deployment (docs/PRIVATE.md) ──
+private-up:         ## start Swave for friends: production api + web + Cloudflare tunnel
+	$(PRIVATE) up -d --build
+
+private-down:       ## stop the private instance (the database keeps running)
+	$(PRIVATE) stop api web cloudflared
+
+private-logs:       ## follow the private instance's logs
+	$(PRIVATE) logs -f --tail 100 api web cloudflared
+
+private-update:     ## deploy the current checkout: rebuild + restart api and web
+	$(PRIVATE) up -d --build api web
+
+backup:             ## back up user data now (scripts/backup.ps1, to C:\SwaveBackups)
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/backup.ps1

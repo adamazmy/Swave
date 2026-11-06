@@ -72,11 +72,13 @@ class Provider(Protocol):
         """A search page at the provider, for when `find` has no match."""
         ...
 
-    def read_playlist(self, conn: psycopg.Connection, http: httpx.Client, ref: str) -> tuple[str, list[dict]]:
+    def read_playlist(self, conn: psycopg.Connection, http: httpx.Client, user: str | None,
+                      ref: str) -> tuple[str, list[dict]]:
         """(name, items [{uri, name, artists}]) of a playlist (read capability)."""
         ...
 
-    def write_playlist(self, conn: psycopg.Connection, http: httpx.Client, name: str, description: str,
+    def write_playlist(self, conn: psycopg.Connection, http: httpx.Client, user: str | None, name: str,
+                       description: str,
                        track_uris: list[str]) -> dict:
         """Create a playlist with these tracks; {"id", "url"} (write capability)."""
         ...
@@ -103,14 +105,14 @@ class SpotifyProvider:
     def search_url(self, name, artist):
         return f"https://open.spotify.com/search/{quote(f'{artist} {name}')}"
 
-    def read_playlist(self, conn, http, ref):
+    def read_playlist(self, conn, http, user, ref):
         pid = spotify.parse_playlist_id(ref)
         if not pid:
             raise ValueError("That doesn't look like a Spotify playlist link")
-        return spotify.playlist_name(conn, http, pid), spotify.playlist_items(conn, http, pid)
+        return spotify.playlist_name(conn, http, user, pid), spotify.playlist_items(conn, http, user, pid)
 
-    def write_playlist(self, conn, http, name, description, track_uris):
-        return spotify.create_playlist(conn, http, name, description, track_uris)
+    def write_playlist(self, conn, http, user, name, description, track_uris):
+        return spotify.create_playlist(conn, http, user, name, description, track_uris)
 
 
 # ── Apple Music (free: iTunes Search API, links only) ─────────────────────────────────────────
@@ -158,11 +160,11 @@ class AppleProvider:
     def search_url(self, name, artist):
         return f"https://music.apple.com/search?term={quote(f'{artist} {name}')}"
 
-    def read_playlist(self, conn, http, ref):
+    def read_playlist(self, conn, http, user, ref):
         raise Unsupported("Swave can't read Apple Music playlists (that needs MusicKit). "
                           "Copy the songs in Apple Music and paste them as a list instead.")
 
-    def write_playlist(self, conn, http, name, description, track_uris):
+    def write_playlist(self, conn, http, user, name, description, track_uris):
         raise Unsupported("Swave can't save to Apple Music (that needs MusicKit). "
                           "Export the set for a transfer tool instead.")
 

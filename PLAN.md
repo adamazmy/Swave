@@ -223,3 +223,56 @@ can be added later; no MusicKit code or placeholder keys.
   "Open in Apple Music" link per kept song. No-preview rows open the track on the chosen service.
 - Previews: the iTunes step now goes through the Apple adapter's matcher (one implementation).
 
+
+# Roadmap after v7 (owner, 2026-11-06)
+
+Order: (1) private instance for the owner + friends, hosted from the owner's PC; (2) move that
+private setup to a VPS; (3) the catalogue rebuild below; (4) a separate public deployment
+(`SWAVE_MODE=public`, own database, `.env.public`, no Access gate, iTunes covers/previews, a
+different domain).
+
+## Public launch: catalogue rebuild (APPROVED, DEFERRED: nothing built yet)
+
+Goal: a catalogue keyed by MusicBrainz recording MBID + ISRC, built from CC0 data only, that
+search, the ListenBrainz index and playlist import run on. The MPD stays a personal-mode
+scorer, mapped onto it. Measured 2026-11-06: 82.5% of the 3.5M LB songs (≥ 10 listeners)
+carry a recording MBID, 93.1% weighted by listeners (75.9% at 10–20 listeners, 99.9% at 1,000+).
+
+1. **Local MusicBrainz import (CC0), streamed.** `mbdump.tar.bz2` (7 GB, 2026-11-04) piped
+   from the download into a parser: never stored or unpacked whole. Kept: artist (+ aliases),
+   artist credits, recording, ISRC, artist→Discogs URL links; recordings limited to artists
+   seen in ListenBrainz (~3–5 GB in Postgres). Every artist/recording lookup then uses this
+   local DB instead of the 1 req/s MusicBrainz API.
+2. **`cat_*` catalogue tables** (built beside the live ones): one row per song (dense id),
+   representative recording MBID, all MBIDs + ISRCs, canonical MB names, artist MBIDs, LB
+   listener counts as popularity, source + licence per row. Songs without an MBID are
+   matched locally by artist + normalised title.
+   **Unmatched songs (~7% of listening): kept** as ListenBrainz-only rows (licence=open, no
+   ISRC, flagged `unmatched`); report their count and the top 50 by listeners.
+3. **LB index rebuilt on catalogue ids** (no MPD in matching), installed with `lb-install`;
+   `artist_tracks` and LB similar artists on artist MBIDs.
+   **Disk:** before the index rebuild, estimate the space for the `cat_*` tables alongside
+   the old ones plus DuckDB temp/spill (explicit temp dir); never go below the 20 GB floor on C:.
+4. **MPD as a personal-only scorer:** MPD tracks mapped to catalogue ids by artist + title;
+   unmatched MPD songs become rows with `source=mpd`, licence non_commercial, hidden in
+   public mode; MPD neighbours re-keyed.
+5. **Repoint the app:** search (trigram over catalogue names + MB artist aliases), playlist
+   import, song identity (web + events move from Spotify URI to a catalogue key; Spotify /
+   Apple ids become per-provider mappings in `provider_tracks`, resolved by ISRC).
+   **Playlist import:** first verify whether Spotify dev-mode playlist responses still include
+   ISRC (`external_ids`) after the Feb 2026 changes; if not, match by normalised artist +
+   title + duration, with an iTunes ISRC lookup as a second pass.
+6. **Accept + switch:** both hold-outs re-run; personal mode must match today (time split
+   0.615, playlists 0.890, within noise) before switching; public numbers reported beside it.
+
+**Scorers for public mode:** LB + LB similar artists; add a similar-artists weight sweep
+(0.25 / 0.5 / 0.75). **Discogs styles: parked** (code kept, weight 0): +0.2 pt at best on
+2026-11-06, coverage gap for newer artists.
+
+**Eval note:** each hold-out favours its own source (LB sessions favour LB; MPD playlists
+favour the MPD). After the switch, add a personal-vs-public side-by-side on the owner's real
+sessions comparing keep rates.
+
+Public vs personal, 2026-11-06 (hit@50 / recall@50): time split: personal 0.6150 / 0.2087,
+LB only 0.6350 / 0.2278, LB + similar 0.6435 / 0.2265; playlists: personal 0.8900 / 0.1788,
+LB only 0.6930 / 0.0863, LB + similar 0.7700 / 0.0994, LB + similar + Discogs 0.7720 / 0.1012.

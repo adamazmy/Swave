@@ -13,6 +13,7 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "httpx>=0.27",
   "pyarrow>=17",
+  "pyjwt[crypto]>=2.8",  # Cloudflare Access JWT verification (private deployment)
 ]
 
 [project.optional-dependencies]

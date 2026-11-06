@@ -19,9 +19,9 @@ def test_capabilities():
     assert (caps["spotify"]["can_search"], caps["spotify"]["can_read"], caps["spotify"]["can_write"]) == (True, True, True)
     assert caps["apple"]["configured"] is True
     with pytest.raises(providers.Unsupported):
-        APPLE.read_playlist(None, None, "https://music.apple.com/us/playlist/x/pl.u-123")
+        APPLE.read_playlist(None, None, None, "https://music.apple.com/us/playlist/x/pl.u-123")
     with pytest.raises(providers.Unsupported):
-        APPLE.write_playlist(None, None, "n", "d", [uri(1)])
+        APPLE.write_playlist(None, None, None, "n", "d", [uri(1)])
 
 
 def test_providers_endpoint(client):  # noqa: F811

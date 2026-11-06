@@ -65,7 +65,7 @@ def resolve(conn: psycopg.Connection, http: httpx.Client, track_ids: list[int]) 
                 continue
             searched += 1
             try:
-                uri = spotify.search_track(conn, http, name, artist)
+                uri = spotify.search_track(conn, http, spotify.ANY, name, artist)
             except (spotify.NotConnected, spotify.SpotifyError):
                 continue  # no definitive answer: try again next time
             if uri is None and mbid and labs is None:

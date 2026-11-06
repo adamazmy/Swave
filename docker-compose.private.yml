@@ -1,0 +1,53 @@
+# Private Swave for the owner + friends, served from this PC through a Cloudflare Tunnel.
+# Production builds (next build + standalone server; uvicorn without --reload).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.private.yml --env-file .env.private up -d --build
+#   (or: make private-up / private-down / private-logs / private-update)
+#
+# Nothing is published on the PC's ports: the only way in is the tunnel, and Cloudflare Access
+# (one-time PIN email login, allowlist) sits in front of it. The API verifies the Access JWT on
+# every request too (SWAVE_REQUIRE_ACCESS=1), so a request that bypassed Cloudflare is refused.
+# The database is the same `db` service and volume as development (docker-compose.yml).
+
+services:
+  api:
+    build: ./api
+    restart: unless-stopped
+    env_file: .env.private
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-swave}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.private}@db:5432/${POSTGRES_DB:-swave}
+      SWAVE_MODE: personal
+      SWAVE_REQUIRE_ACCESS: "1"
+      SWAVE_SCORERS: /app/scorers.json
+    volumes:
+      - ./scorers.json:/app/scorers.json:ro   # live weights, unchanged from development
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  cloudflared:
+    # Remote-managed named tunnel: its routes (/api/* → api:8000, everything else → web:3000)
+    # are set in the Cloudflare dashboard; this container only needs the tunnel token.
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env.private}
+    depends_on:
+      - web
+      - api

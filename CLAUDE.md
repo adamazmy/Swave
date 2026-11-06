@@ -1,7 +1,7 @@
 # CLAUDE.md: Swave
 
 Personal playlist builder. One loop: **seed → recommend → refine → save**.
-Single user (the owner), runs locally. **The GitHub repo is PUBLIC**: read "Public repo rules" before every commit.
+Runs locally for development; a **private instance** for the owner + friends runs from the owner's PC behind Cloudflare Tunnel + Access (`docs/PRIVATE.md`, `docker-compose.private.yml`). **The GitHub repo is PUBLIC**: read "Public repo rules" before every commit.
 
 ## Architecture
 
@@ -21,12 +21,12 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
   - `eval_holdout(pid)`: the 1,000 held-out playlists
   - `neighbours(track_id, neighbour_id, sim, co_count)`: top-200 per track, precomputed (ints keep this ~130M-row table small)
   - `index_meta(method, k, min_co, built_at, git)`: how `neighbours` was built
-  - `events(id, ts, action, track_uri, position, slider, session_id)`: actions: shown, seeded, previewed, kept, removed, more_like_this, saved (`shown` = keep-rate denominator)
+  - `events(id, ts, action, track_uri, position, slider, session_id, user_id)`: actions: shown, seeded, previewed, kept, removed, more_like_this, saved (`shown` = keep-rate denominator)
   - `previews(track_uri PK, deezer_id, matched, checked_at)`: v1–v3 Deezer match cache, no longer read (its matches were copied into `preview_sources`)
   - `preview_sources(track_uri, source, provider_id, has_preview, checked_at)`: v4 preview cache, one row per track and source (deezer, itunes); provider ids only, NULL id = no match (retried after 30 days)
   - `track_meta(track_uri PK, isrc, duration_ms, checked_at)`: from Spotify `GET /tracks/{id}` (one call per track; the batch endpoint is 403 in dev mode), for ISRC lookup and the ±3 s duration check
   - `preview_attempts(id, ts, session_id, track_uri, outcome, source, steps)`: one row per play click with its final outcome (ok, no_match, matched_no_preview, expired_url, playback_error, source_error), logged by the browser
-  - `spotify_auth(id=1, refresh_token, expires_at)`: single row, owner's token
+  - `spotify_auth(user_id PK, access_token, refresh_token, expires_at, display_name, scope)`: one row per user (the old single `id = 1` row is re-keyed to `local` at startup); `spotify.ANY` = any connected account, for public catalogue lookups only (ISRC, track search)
   - `covers(track_uri PK, image_url NULL, checked_at)`: album cover URL per track from Spotify's public oEmbed (`covers.py`, no login; misses retried after 30 days). `POST /covers` is called by Results after the list shows, never blocks it
   - `artist_tracks(artist_key, track_id, pop)`: top 30 songs per primary artist (`make artist-index`), for the related-artists scorer
   - `deezer_related(artist_key PK, deezer_id NULL, related jsonb, checked_at)`: Deezer related artists per artist key (misses retried after 30 days)
@@ -44,6 +44,13 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
 - **ListenBrainz scorer** (`cooccurrence_lb`, reason "N listening sessions"): `make lb-ingest` range-reads 5 columns of the remote Spark dump (an uncompressed .tar of time-ordered Parquet files; `lb.walk_back` lists it from the end) for listens since `LB_SINCE`, per listen (user, ts, song hash) in 64 user buckets under `data/lb/`. `make lb-build`: sessions (30-min gap, repeats collapsed, < 3 songs dropped, > 200 cut), vocabulary ≥ 20 listeners (1.5 M songs; ≥ 10 = 2.7 M was too big), match to MPD (exact song key, then title prefix ≥ 60%), cosine top-100. RAM: the session matrix is capped at 200 M entries (`--max-nnz`, hash sample of whole sessions: 39% of 32.9 M); the first uncapped build was killed by memory pressure. LB-only tracks have no Spotify id: `resolve.py` resolves them when shown (labs `spotify-id-from-mbid`, batched, then Spotify search ≤ 10/request) and `/recommend` ranks `RESOLVE_SPARE` extra rows to replace unresolvable ones. Playlist import matches LB-only songs too and stores the playlist's own URI in `lb_spotify`. Sessions are often album/artist runs, so LB alone over-recommends the seed's artist.
 - **Related-artists scorer** (`related.py`, reason "by an artist similar to your seeds'" / "by your seed's artist"): seed artists → Deezer `/search/artist` (exact `previews.loose_artist` match) → `/artist/{id}/related` (20, Deezer's order) → the top 20 catalogue songs per artist from `artist_tracks` (`make artist-index`; lb-install rebuilds it). Score = artist weight (1 / (1 + rank/5), the seed's own artist 0.5) × (0.5 + 0.5 · pop / the artist's best), averaged over seed artists. It fixes thin, noisy co-occurrence lists for niche/post-2018 seeds (Saint Levant: 11 of 12 removed off-vibe songs → 2). Eval (time split, mix): 0.15 → hit 0.6215, 0.25 → 0.6150, 0.5 → 0.5940 vs 0.6165 without; the eval undersells it (an on-vibe song the listener didn't play counts as a miss). Deezer API terms are non-commercial, like the MPD licence.
 - **Commercial-safe scorers** (CC0, for public mode): `lb_similar_artists` = the related-artists scoring over ListenBrainz's session-based similar artists (`related.SCORERS`); `discogs_style` = a BOOST scorer (`styles.py`, `boost = True`): it adds no candidates, `recommend.combine` asks it to score the union of the other scorers' candidates by the cosine between the candidate artist's and the seed artists' Discogs style profiles.
+- **Users** (`access.py`): with `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` set, a middleware verifies the
+  Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`, RS256, Cloudflare's certs, audience, expiry) on every
+  request but `/health` and rejects it (403) otherwise; the email is `request.state.user` and keys events,
+  `preview_attempts`, the Spotify login, `GET /me` and `DELETE /me/data` (web page `/data`, "What Swave
+  stores"). Without them (development) everyone is `local`; `SWAVE_REQUIRE_ACCESS=1` (private compose) makes
+  a missing config a startup error. Production serves the API under `/api` on the web's domain:
+  `swave.serve:create` strips the prefix (uvicorn `--root-path` does not: it expects a stripping proxy).
 - **Licences** (`licences.py`): every scorer, preview source and data source is tagged `open` / `non_commercial` / `unreviewed`. `SWAVE_MODE=public` makes `create_app` raise at startup on any non-commercial component (MPD scorer, Deezer related artists, Deezer previews: use `SWAVE_PREVIEW_SOURCES=itunes`). Covers come from Spotify oEmbed and are hotlinked, never stored (`unreviewed`, like iTunes). Never store Deezer images; Deezer's terms have no caching clause, so the 30-day related-artist cache is fine (owner, 2026-11-06). **Known gap:** the catalogue (`tracks`, and the LB ids matched to it) is MPD-derived (`catalogue:mpd`), so public mode cannot start until the catalogue is rebuilt from ListenBrainz/MusicBrainz. **Public-mode media:** covers and previews will come from Apple (iTunes Search now, MusicKit later), not Spotify or Deezer (owner, 2026-11-06).
 - **Held-out eval set** (`eval_holdout`, made by ingest): 1,000 playlists with ≥ 10 tracks, chosen by `md5(pid)` order. They are excluded from the training matrix and `neighbours`, so eval never leaks.
 - **Eval doesn't need the index**: it computes neighbours for its ~5k seed tracks on the fly with the same `cooc.neighbours()` function (same top-k truncation) as build-index, so comparing methods/k/alpha takes minutes, not hours. The training matrix is cached in `data/cache/` (deleted by ingest).
