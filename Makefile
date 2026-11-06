@@ -107,5 +107,5 @@ private-logs:       ## follow the private instance's logs
 private-update:     ## deploy the current checkout: rebuild + restart api and web
 	$(PRIVATE) up -d --build api web
 
-backup:             ## back up user data now (scripts/backup.ps1, to C:\SwaveBackups)
+backup:             ## back up user data now (scripts/backup.ps1, to SWAVE_BACKUP_DIR)
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/backup.ps1

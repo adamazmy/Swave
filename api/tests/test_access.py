@@ -97,3 +97,17 @@ def test_old_single_row_spotify_login_is_rekeyed_to_the_local_user(dsn):  # noqa
         assert c.get("/auth/status").json()["display_name"] == "Owner"
     with psycopg.connect(dsn) as conn:
         assert conn.execute("SELECT user_id FROM spotify_auth").fetchall() == [("local",)]
+
+
+def test_issuer_must_be_your_team_domain_and_tokens_must_expire(gated):
+    now = int(time.time())
+    claims = {"email": "friend@example.com", "aud": [CFG.aud], "iat": now, "exp": now + 600}
+    other_team = jwt.encode({**claims, "iss": "https://someone-else.cloudflareaccess.com"}, KEY, algorithm="RS256")
+    no_issuer = jwt.encode(claims, KEY, algorithm="RS256")
+    no_expiry = jwt.encode({k: v for k, v in claims.items() if k != "exp"} | {"iss": CFG.issuer},
+                           KEY, algorithm="RS256")
+    just_expired = token(exp=now - 1)
+    for bad in (other_team, no_issuer, no_expiry, just_expired):
+        r = gated.get("/me", headers=h(bad))
+        assert r.status_code == 403 and "Invalid Cloudflare Access token" in r.json()["detail"]
+    assert gated.get("/me", headers=h(token())).status_code == 200

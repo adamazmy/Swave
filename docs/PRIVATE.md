@@ -46,13 +46,19 @@ with `make private-update`.
 
 ## Backups
 
-`make backup` backs up user data now; `scripts\install-backup-task.ps1` (run once) schedules it
-nightly at 03:30 into `C:\SwaveBackups`, keeping 7 days. Backed up: events, preview attempts,
-Spotify logins (the files hold refresh tokens: keep that folder private) and the lookup caches.
-Not backed up: the music index (~20 GB), which is rebuilt with the `make` pipeline.
+Set `SWAVE_BACKUP_DIR` in `.env.private` to a folder that leaves this PC, e.g.
+`C:\Users\<you>\OneDrive\SwaveBackups` (OneDrive syncs it to the cloud, so a dead PC doesn't
+take the backups with it). Then `make backup` backs up now, and
+`scripts\install-backup-task.ps1` (run once) schedules it nightly at 03:30, keeping 7 days
+(log: `%LOCALAPPDATA%\Swave\backup.log`).
+
+Backed up: events, preview attempts and the lookup caches. **Spotify logins are left out** by
+default (they are refresh tokens, and the folder syncs to a cloud drive): after a restore each
+person reconnects Spotify once. `SWAVE_BACKUP_TOKENS=1` includes them. Not backed up: the music
+index (~20 GB), which is rebuilt with the `make` pipeline.
 
 Restore (stop the API first): `make private-down`, then
-`powershell -File scripts\restore.ps1 -File C:\SwaveBackups\swave-YYYYMMDD-HHMM.dump`,
+`powershell -File scripts\restore.ps1 -File <folder>\swave-YYYYMMDD-HHMM.dump`,
 then `make private-up`.
 
 ## Settings
