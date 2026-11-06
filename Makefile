@@ -12,7 +12,7 @@ K ?= 200
 MIN_CO ?= 2
 ALPHA ?= 0
 
-.PHONY: setup db ingest build-index lb-ingest lb-names lb-index lb-build lb-report eval api web dev feedback test preview-report preview-bench
+.PHONY: setup db ingest build-index lb-ingest lb-names lb-index lb-install lb-build lb-report eval api web dev feedback test preview-report preview-bench
 
 WEEKS ?= 8
 DAYS ?= 7
@@ -49,6 +49,9 @@ lb-index: db        ## candidate LB index -> data/lb/runs/$(RUN)/ (app tables un
 
 lb-eval: db         ## time-split eval of data/lb/runs/$(RUN) (LB only + the app's mix) -> eval/results.csv
 	$(VENV_PY) -m swave.pipeline.evaluate --holdout time --lb-run $(RUN) $(if $(LB_K),--lb-k $(LB_K)) --scorers eval/scorers/lb.json scorers.json
+
+lb-install: db      ## data/lb/runs/$(RUN) -> app tables (old ones kept as *_old); ARGS="--rollback" / "--drop-old"
+	$(VENV_PY) -m swave.pipeline.lb_install $(if $(RUN),--run $(RUN)) $(ARGS)
 
 lb-build: db        ## data/lb/ -> sessions, matching, lb_tracks, neighbours_lb, lb_holdout
 	$(VENV_PY) -m swave.pipeline.lb_build --min-listeners $(LB_MIN_LISTENERS) --k $(LB_K)

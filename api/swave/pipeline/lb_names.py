@@ -27,6 +27,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from swave import lb
 from swave.pipeline.lb_ingest import LB_DIR
 
 NAMES = LB_DIR / "names"
@@ -86,7 +87,7 @@ def shard_of(song: pa.ChunkedArray) -> np.ndarray:
 
 
 def inputs() -> list[Path]:
-    return sorted(NAMES.glob("*.parquet"), key=lambda p: int(p.stem)) if NAMES.exists() else []
+    return sorted(NAMES.glob("*.parquet"), key=lambda p: lb.file_key(p.stem)) if NAMES.exists() else []
 
 
 def totals(files: list[Path], t0: float) -> tuple[int, int]:

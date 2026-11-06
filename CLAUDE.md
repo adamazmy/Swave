@@ -29,7 +29,7 @@ Offline pipeline (api/swave/pipeline/):  MPD zip/slices ─▶ ingest ─▶ bui
   - `spotify_auth(id=1, refresh_token, expires_at)`: single row, owner's token
   - `provider_tracks(track_uri, provider, provider_id, checked_at)`: a track's id at another service (Apple Music song id from iTunes Search); NULL = not found, retried after 30 days
   - `lb_tracks(track_id, song, name, artist, recording_mbid, listeners, pop_est)`: ListenBrainz songs NOT in the MPD; `track_id`s continue after MPD's (594,421+), `song` = `matching.song_hash` of the normalised title+artist; `pop_est` = listeners mapped onto the playlist_count scale
-  - `neighbours_lb(track_id, neighbour_id, sim, co_count)`: top-100 per track from listening sessions (ids = MPD or lb_tracks); `lb_holdout(sess, pos, track_id)`, `lb_meta(built_at, git, stats)`
+  - `neighbours_lb(track_id, neighbour_id, sim, co_count)`: top-100 per track from listening sessions (ids = MPD or lb_tracks); `lb_holdout(sess, pos, track_id)`, `lb_meta(built_at, git, stats)`. `make lb-install RUN=<name>` puts a candidate from `make lb-index` live and keeps the replaced tables as `*_old` (`ARGS=--rollback` swaps them back, `ARGS=--drop-old` drops them once approved)
   - `lb_spotify(song PK, track_uri NULL, checked_at)`: app-owned cache of resolved Spotify URIs for LB songs (misses cached, retried after 30 days), survives `lb-build`
   - view `all_tracks` = `tracks` ∪ resolved `lb_tracks` (album ''): use it for anything keyed by `track_uri`. `lb-build` drops lb_tracks with CASCADE and recreates the view (`lb.VIEW`); the API also creates the LB tables/view at startup (`lb.SCHEMA`)
 - **Recommender v1** = item-item co-occurrence. `sim` is cosine `c_ij / sqrt(n_i·n_j)` or PMI (whichever evaluates better, recorded in `eval/results.csv`).
@@ -48,7 +48,7 @@ api/                 Python package + FastAPI app
     config.py        env/.env, paths, DB connection
     cooc.py          playlist×track matrix, top-k neighbours (cosine / PPMI)
     pipeline/        ingest.py, build_index.py, evaluate.py, feedback.py,
-                     lb_ingest.py, lb_build.py, lb_report.py,
+                     lb_ingest.py, lb_names.py, lb_index.py, lb_install.py, lb_build.py, lb_report.py,
                      preview_report.py, preview_bench.py  (CLI entry points)
     scorers.py       Scorer interface + co-occurrence scorer (neighbour lookup from DB or memory)
     lb.py            ListenBrainz: remote tar/Parquet range reads, sessions, LB tables + all_tracks view
@@ -85,6 +85,9 @@ make ingest              # dataset → tracks, playlist_tracks (prunes < 5 playl
 make build-index         # sparse matrix → neighbours table (METHOD=cosine|pmi)
 make lb-ingest           # ListenBrainz listens since LB_SINCE → data/lb/ (~2 h, ~31 GB)
 make lb-build            # sessions, matching, lb_tracks, neighbours_lb, lb_holdout (~20 min from cache)
+make lb-index RUN=x      # candidate index from ALL ingested listens -> data/lb/runs/x/ (app untouched, ~100 min)
+make lb-eval RUN=x       # time-split eval of a candidate (last 30 days held out)
+make lb-install RUN=x    # candidate -> app tables, old kept as *_old (~10 min)
 make lb-report           # match rate + post-2017 share of new tracks (MusicBrainz API, 1 req/s)
 make eval                # hit-rate@50, recall@50 → eval/results.csv (SCORERS=cfg.json HOLDOUT=mpd|lb);
                          # evaluate.py takes several --scorers configs (eval/scorers/*.json)

@@ -109,13 +109,14 @@ def log(msg: str, t0: float) -> None:
 
 def time_split(dirs: list[Path], days: int) -> tuple[int, int]:
     """(cutoff, end): end = the newest listen; sessions starting at/after cutoff are held out."""
-    end = int(np.load(dirs[-1] / "ts.npy", mmap_mode="r").max())
+    # every file, not dirs[-1]: files from an older dump's history sort after the original ones
+    end = max(int(np.load(d / "ts.npy", mmap_mode="r").max(initial=0)) for d in dirs)
     return end - days * 86400, end
 
 
 def training_vocab(dirs: list[Path], cutoff: int, t0: float) -> tuple[np.ndarray, np.ndarray]:
     """(song, listeners) for songs with ≥ VOCAB_FLOOR distinct users before `cutoff` (cached)."""
-    path = RUNS / f"vocab_{cutoff}.npz"
+    path = RUNS / f"vocab_{cutoff}_{len(dirs)}.npz"  # more ingested files = a different vocabulary
     if path.exists():
         z = np.load(path)
         return z["song"], z["listeners"]
@@ -218,7 +219,9 @@ def build_matrix(dirs, cutoff, vocab, tid, n_tracks, args, meter, stats) -> cooc
             n_sess.append(len(lens))
             nnz.append(int(lens.sum()))
     S, N = sum(n_sess), sum(nnz)
-    need = (N * 16 + S * 16 + n_tracks * 24) / 1e9 + 2.5  # X + Xt + indptrs + chunk working set
+    # X only (Xt is sliced on demand) + indptr + per-track arrays + chunk working set
+    # (baseline: 3.6 GB measured with X + Xt = 3.1 GB, so ~0.5 GB working set; 1.5 GB kept as margin)
+    need = (N * 8 + S * 8 + n_tracks * 24) / 1e9 + 1.5
     stats.update(sessions=S, entries=N, est_ram_gb=round(need, 1))
     log(f"{S:,} training sessions, {N:,} entries; matrix needs ~{need:.1f} GB "
         f"(budget {args.ram_gb} GB)", meter.t0)
@@ -241,15 +244,38 @@ def build_matrix(dirs, cutoff, vocab, tid, n_tracks, args, meter, stats) -> cooc
                 log(f"  fill: bucket {b + 1}/{lb.BUCKETS}", meter.t0)
         assert (r, e) == (S, N)
     with meter.step("transpose"):
-        # Xt carries the session weights; X stays binary (c_ij = Σ_s w_s x_si x_sj)
+        # X carries the session weights; Xt is never materialised (it would double the RAM):
+        # BinaryRowsOfT slices X's columns per chunk and makes them binary, so
+        # Xt[rows] @ X = Σ_s x_si · w_s x_sj = c_ij exactly, as before.
         X = sp.csr_matrix((np.repeat(weight, np.diff(indptr)), indices, indptr),
                           shape=(S, n_tracks))
         del indices
-        Xt = X.T.tocsr()
-        X.data[:] = 1.0
-        n = np.asarray(Xt.sum(axis=1)).ravel().astype(np.float64)
+        n = column_sums(X)
         stats["weight_share"] = round(float(weight.sum() / S), 4)
-    return cooc.Cooc(X=X, Xt=Xt, n=n, P=S)
+    return cooc.Cooc(X=X, Xt=BinaryRowsOfT(X), n=n, P=S)
+
+
+class BinaryRowsOfT:
+    """Stands in for Xt (tracks × sessions, binary) in `cooc.neighbours` without storing it:
+    `self[rows]` is X[:, rows].T as a small binary CSR (one O(nnz) scan of X per chunk)."""
+
+    def __init__(self, X: sp.csr_matrix):
+        self.X = X
+        self.shape = (X.shape[1], X.shape[0])
+
+    def __getitem__(self, rows: np.ndarray) -> sp.csr_matrix:
+        m = self.X[:, rows].T.tocsr()
+        m.data[:] = 1.0
+        return m
+
+
+def column_sums(X: sp.csr_matrix, step: int = 2_000_000) -> np.ndarray:
+    """Σ over rows of X's values per column, in row blocks (no nnz-sized float64 temporary)."""
+    n = np.zeros(X.shape[1])
+    for a in range(0, X.shape[0], step):
+        p0, p1 = X.indptr[a], X.indptr[min(a + step, X.shape[0])]
+        n += np.bincount(X.indices[p0:p1], weights=X.data[p0:p1], minlength=len(n))
+    return n
 
 
 def chunks(c: cooc.Cooc, rows: np.ndarray, budget: int) -> list[np.ndarray]:
@@ -313,7 +339,7 @@ def main() -> None:
     log(f"vocabulary: {len(vocab):,} songs with ≥ {args.min_listeners} training listeners", t0)
 
     with meter.step("names + matching"):
-        names = vocab_names(vocab, t0, RUNS / f"names_{cutoff}_{args.min_listeners}.parquet")
+        names = vocab_names(vocab, t0, RUNS / f"names_{cutoff}_{len(dirs)}_{args.min_listeners}.parquet")
         with connect() as conn:
             n_mpd = conn.execute("SELECT max(track_id) + 1 FROM tracks").fetchone()[0]
             tid, how = match(conn, names)

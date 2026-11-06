@@ -18,9 +18,22 @@ import pyarrow.parquet as pq
 
 from swave.matching import song_hash  # noqa: F401 (re-exported)
 
+# MetaBrainz keeps only the latest full dumps: 2723 (2026-10-15, our listens since 2023-11) was
+# removed by 2026-11-05; the history before 2023-11 comes from 2759 (`lb-ingest --until`).
 DUMP_URL = ("https://data.metabrainz.org/pub/musicbrainz/listenbrainz/fullexport/"
-            "listenbrainz-dump-2723-20261015-000002-full/"
-            "listenbrainz-spark-dump-2723-20261015-000002-full.tar")
+            "listenbrainz-dump-2759-20261101-000003-full/"
+            "listenbrainz-spark-dump-2759-20261101-000003-full.tar")
+LEGACY_DUMP = "2723"  # its files were ingested as listens/<n>/; other dumps as <dump>-<n>/
+
+
+def dump_no(name: str) -> str:
+    """Dump number of a tar URL or member name ('…spark-dump-2759-2026…' → '2759')."""
+    return name.split("spark-dump-", 1)[1].split("-", 1)[0]
+
+
+def file_key(stem: str) -> tuple[int, ...]:
+    """Sort key of an ingested file id: '961' → (961,), '2759-12' → (2759, 12)."""
+    return tuple(int(x) for x in stem.split("-"))
 COLUMNS = ["user_id", "listened_at", "artist_name", "recording_name", "recording_mbid"]
 SESSION_GAP = 30 * 60  # seconds
 MIN_SESSION = 3

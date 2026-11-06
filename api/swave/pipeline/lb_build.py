@@ -46,7 +46,7 @@ def log(msg: str, t0: float) -> None:
 
 def member_dirs() -> list[Path]:
     dirs = [d for d in (LB_DIR / "listens").iterdir() if (d / "done").exists()]
-    return sorted(dirs, key=lambda d: int(d.name))
+    return sorted(dirs, key=lambda d: lb.file_key(d.name))
 
 
 def load_bucket(dirs: list[Path], b: int, cols=("user", "ts", "song")) -> dict[str, np.ndarray]:
