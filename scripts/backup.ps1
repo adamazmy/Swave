@@ -16,7 +16,10 @@ param(
     [int]$Days = 7,
     [switch]$IncludeTokens
 )
-$ErrorActionPreference = "Stop"
+# "Continue", not "Stop": Docker writes progress to stderr, which Windows PowerShell 5.1 turns
+# into error records when output is redirected (scheduled task); success is judged by exit codes.
+$ErrorActionPreference = "Continue"
+"=== Swave backup {0:yyyy-MM-dd HH:mm:ss}" -f (Get-Date)
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
@@ -47,18 +50,18 @@ if (-not $offPc -and $full.StartsWith($env:SystemDrive, [StringComparison]::Ordi
 $tables = "events", "preview_attempts", "lb_spotify", "covers", "deezer_related",
           "lb_similar", "provider_tracks", "preview_sources", "track_meta", "previews"
 if ($IncludeTokens) { $tables += "spotify_auth" }
-New-Item -ItemType Directory -Force $full | Out-Null
+New-Item -ItemType Directory -Force $full -ErrorAction Stop | Out-Null
 $name = "swave-{0:yyyyMMdd-HHmm}.dump" -f (Get-Date)
 $t = ($tables | ForEach-Object { "-t $_" }) -join " "
 # dump inside the container (binary-safe), then copy it out
-docker compose exec -T db sh -c "pg_dump -U `$POSTGRES_USER -d `$POSTGRES_DB -Fc $t -f /tmp/$name"
+docker compose exec -T db sh -c "pg_dump -U `$POSTGRES_USER -d `$POSTGRES_DB -Fc $t -f /tmp/$name" 2>&1 | ForEach-Object { "$_" }
 if ($LASTEXITCODE -ne 0) { throw "pg_dump failed ($LASTEXITCODE)" }
-docker compose cp "db:/tmp/$name" (Join-Path $full $name)
+docker compose cp "db:/tmp/$name" (Join-Path $full $name) 2>&1 | ForEach-Object { "$_" }
 if ($LASTEXITCODE -ne 0) { throw "copy out of the container failed ($LASTEXITCODE)" }
-docker compose exec -T db rm -f "/tmp/$name" | Out-Null
-$size = [math]::Round((Get-Item (Join-Path $full $name)).Length / 1MB, 1)
+docker compose exec -T db rm -f "/tmp/$name" 2>&1 | Out-Null
+$size = [math]::Round((Get-Item (Join-Path $full $name) -ErrorAction Stop).Length / 1MB, 1)
 Get-ChildItem $full -Filter "swave-*.dump" |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$Days) } |
-    ForEach-Object { Remove-Item $_.FullName; "removed old backup $($_.Name)" }
+    ForEach-Object { Remove-Item $_.FullName -ErrorAction Stop; "removed old backup $($_.Name)" }
 $what = if ($IncludeTokens) { "with Spotify logins" } else { "without Spotify logins" }
 "backup ok: $(Join-Path $full $name) ($size MB, $what)"

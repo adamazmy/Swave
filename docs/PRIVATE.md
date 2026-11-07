@@ -19,19 +19,25 @@ All commands run from the repo folder (`C:\Dev\Swave`), with Docker Desktop runn
 The PC must be on, awake and running Docker for friends to use Swave. The containers restart on
 their own after Docker restarts. Development (`make dev`) can run at the same time.
 
-## Add or remove a friend
+## Inviting a friend (checklist)
 
-1. **Cloudflare** (lets them in): Zero Trust → Access → Applications → Swave → Policies →
-   "Friends" → add or remove their email under *Include → Emails* → Save. Takes effect at
-   their next login; to cut someone off at once, also revoke their session
+- [ ] **Let them in:** Cloudflare Zero Trust → Access controls → Policies → **Friends** → add
+      their email under *Include → Emails* → Save.
+- [ ] **Saving straight to Spotify** (optional): developer.spotify.com → Dashboard → Swave app →
+      **User Management** → add their name and the email of *their Spotify account*. Max 5
+      people including you; everyone else uses *Copy for Spotify*, the CSV or the song links.
+- [ ] **Send them the link** (`https://swave.party`) and tell them: enter your email, then the
+      login code Cloudflare emails you, and **check spam for the first login code**.
+
+## Removing a friend
+
+1. Ask them to press **Delete my data** first (footer → *What Swave stores*), or run
+   `DELETE FROM events WHERE user_id = '<email>'` (and the same for `preview_attempts`,
+   `spotify_auth`) yourself.
+2. Cloudflare Zero Trust → Access controls → Policies → **Friends** → remove their email →
+   Save. That stops their next login; to cut them off at once, also revoke their session
    (Zero Trust → My Team → Users → the user → Revoke sessions).
-2. **Spotify** (only if they should save playlists to Spotify, max 5 people including you):
-   developer.spotify.com → Dashboard → Swave app → User Management → add their name and the
-   email of their Spotify account. Everyone else uses *Copy for Spotify*, the CSV or the song
-   links instead.
-3. When someone leaves, ask them to press **Delete my data** first (footer → *What Swave
-   stores*), or run `DELETE FROM events WHERE user_id = '<email>'` (and the same for
-   `preview_attempts`, `spotify_auth`) yourself.
+3. Spotify dashboard → User Management → remove them, if they were on it.
 
 ## Deploy an update
 
@@ -50,7 +56,9 @@ Set `SWAVE_BACKUP_DIR` in `.env.private` to a folder that leaves this PC, e.g.
 `C:\Users\<you>\OneDrive\SwaveBackups` (OneDrive syncs it to the cloud, so a dead PC doesn't
 take the backups with it). Then `make backup` backs up now, and
 `scripts\install-backup-task.ps1` (run once) schedules it nightly at 03:30, keeping 7 days
-(log: `%LOCALAPPDATA%\Swave\backup.log`).
+(log: `%LOCALAPPDATA%\Swave\backup.log`). If the PC is off or asleep at 03:30, the backup runs
+as soon as it's back on (Docker must be running). Check it:
+`Get-ScheduledTask "Swave nightly backup" | Get-ScheduledTaskInfo` (LastTaskResult 0 = success).
 
 Backed up: events, preview attempts and the lookup caches. **Spotify logins are left out** by
 default (they are refresh tokens, and the folder syncs to a cloud drive): after a restore each
