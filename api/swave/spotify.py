@@ -56,6 +56,17 @@ END $$;
 ANY = None  # user for public catalogue lookups: any connected account
 
 
+class NotAllowlisted(Exception):
+    """Spotify accepted the login but refuses this account: in development mode only accounts on
+    the app's User Management allowlist may use it (max 5, owner included)."""
+
+
+def is_allowlist_error(e: "SpotifyError") -> bool:
+    """A 403 that means "this user isn't registered for this app", not "you can't edit that playlist"."""
+    m = e.message.lower()
+    return e.status == 403 and ("regist" in m or "developer" in m or "dashboard" in m or "not allowed" in m)
+
+
 class SpotifyError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
@@ -146,7 +157,13 @@ def connect(conn: psycopg.Connection, http: httpx.Client, user: str | None, code
     if not tok.get("refresh_token"):
         raise SpotifyError(502, "Spotify returned no refresh token")
     _store(conn, user, tok)
-    me = call(conn, http, user, "GET", "/me").json()
+    try:
+        me = call(conn, http, user, "GET", "/me").json()
+    except SpotifyError as e:
+        if e.status == 403:  # the login worked but this account may not use the app
+            disconnect(conn, user)
+            raise NotAllowlisted from e
+        raise
     name = me.get("display_name") or me.get("id") or "Spotify user"
     conn.execute("UPDATE spotify_auth SET display_name = %s WHERE user_id = %s", (name, user))
     return name

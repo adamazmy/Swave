@@ -18,10 +18,10 @@ import {
 } from "@/lib/stored";
 import { openTrackUrl, useProvider } from "@/lib/provider";
 import { useCovers } from "@/lib/use-covers";
+import { connect as connectService } from "@/lib/services";
 import { usePreview } from "@/lib/use-preview";
 import { PlusIcon, Spinner, XIcon } from "./icons";
 import { Mosaic, Ticker } from "./night";
-import ProviderSwitch from "./provider-switch";
 import { CoverButton } from "./track-row";
 
 const PASTE_EXAMPLE = ["Mr. Brightside - The Killers", "September - Earth, Wind & Fire"].join("\n");
@@ -293,8 +293,7 @@ export default function SeedScreen() {
           )}
         </form>
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <ProviderSwitch />
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <button
             type="button"
             onClick={() => setPasteOpen((o) => !o)}
@@ -337,9 +336,10 @@ export default function SeedScreen() {
           <p className="text-sm text-muted" aria-live="polite">
             {importMsg.text}{" "}
             {importMsg.connect && (
-              <a href={api.loginUrl(typeof window === "undefined" ? "" : window.location.href)} className="text-pink underline">
+              <button type="button" onClick={() => connectService("spotify")}
+                      className="min-h-11 text-pink underline hover:text-pink-soft">
                 Connect Spotify
-              </a>
+              </button>
             )}
           </p>
         )}

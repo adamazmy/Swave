@@ -46,6 +46,13 @@ CREATE INDEX IF NOT EXISTS events_ts ON events (ts);
 -- per-user since the private deployment (Cloudflare Access email; 'local' in development)
 ALTER TABLE events ADD COLUMN IF NOT EXISTS user_id text;
 CREATE INDEX IF NOT EXISTS events_user ON events (user_id);
+-- "I listen on": the music service each user picked, and whether Spotify refused their account
+CREATE TABLE IF NOT EXISTS user_prefs (
+    user_id         text PRIMARY KEY,
+    music_service   text CHECK (music_service IN ('spotify', 'apple', 'other')),
+    spotify_blocked boolean NOT NULL DEFAULT false,
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
 ALTER TABLE events DROP CONSTRAINT IF EXISTS events_action_check;
 ALTER TABLE events ADD CONSTRAINT events_action_check
     CHECK (action IN ({", ".join(f"'{a}'" for a in ACTIONS)}));
@@ -194,6 +201,11 @@ class ImportOut(BaseModel):
     unmatched: list[str]  # "Title · Artist" of songs not found (first 50)
 
 
+class ServiceIn(BaseModel):
+    # Apple Music is listed but not selectable yet (MusicKit pending): see /me/service
+    service: Literal["spotify", "other"]
+
+
 class AuthStatus(BaseModel):
     configured: bool
     connected: bool
@@ -248,8 +260,9 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_methods=["GET", "POST", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Content-Type"],
+        expose_headers=["X-Swave-Error"],
     )
 
     @app.middleware("http")
@@ -282,10 +295,25 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                 return url
         return origins[0] + "/"
 
+    owner_name = os.environ.get("SWAVE_OWNER_NAME", "").strip() or "the owner"
+
+    def set_blocked(conn, user: str, blocked: bool) -> None:  # noqa: ANN001
+        conn.execute("""INSERT INTO user_prefs (user_id, spotify_blocked) VALUES (%s, %s)
+                        ON CONFLICT (user_id) DO UPDATE SET spotify_blocked = EXCLUDED.spotify_blocked,
+                        updated_at = now()""", (user, blocked))
+        conn.commit()
+
+    def not_allowlisted(conn, user: str) -> HTTPException:  # noqa: ANN001
+        set_blocked(conn, user, True)
+        return HTTPException(403, f"Your Spotify account isn't on this app's list yet: ask {owner_name} to add "
+                                  "it. Until then, use Copy for Spotify.",
+                             headers={"X-Swave-Error": "not_allowlisted"})
+
     def http_error(e: Exception) -> HTTPException:
         """Map Spotify failures to clean HTTP errors."""
         if isinstance(e, spotify.NotConnected):
-            return HTTPException(401, "Connect Spotify first")
+            # X-Swave-Error tells the web app to reconnect (and finish the action) by itself
+            return HTTPException(401, "Connect Spotify first", headers={"X-Swave-Error": "reconnect"})
         assert isinstance(e, spotify.SpotifyError)
         hint = (" (dev-mode apps only work for the owner and allow-listed users; "
                 "check the app's User Management)") if e.status == 403 else ""
@@ -510,6 +538,28 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                 "preview_attempts": attempts, "spotify_connected": st is not None,
                 "spotify_name": st[0] if st else None}
 
+    @app.get("/me/service")
+    def get_service(request: Request) -> dict:
+        """The music service you picked ("I listen on"; null = not chosen yet: the web app shows
+        the picker once) and your Spotify connection."""
+        user = user_of(request)
+        with pool.connection() as conn:
+            row = conn.execute("SELECT music_service, spotify_blocked FROM user_prefs WHERE user_id = %s",
+                               (user,)).fetchone()
+            st = spotify.status(conn, user)
+        return {"service": row[0] if row else None, "owner_name": owner_name,
+                "spotify": {"configured": bool(os.environ.get("SPOTIFY_CLIENT_ID", "").strip()),
+                            "connected": st is not None, "display_name": st[0] if st else None,
+                            "can_upload_cover": bool(st and st[1]), "blocked": bool(row and row[1])}}
+
+    @app.put("/me/service")
+    def put_service(body: ServiceIn, request: Request) -> dict:
+        with pool.connection() as conn:
+            conn.execute("""INSERT INTO user_prefs (user_id, music_service) VALUES (%s, %s)
+                            ON CONFLICT (user_id) DO UPDATE SET music_service = EXCLUDED.music_service,
+                            updated_at = now()""", (user_of(request), body.service))
+        return get_service(request)
+
     @app.delete("/me/data")
     def delete_my_data(request: Request) -> dict:
         """Delete every row Swave keeps about you: events, preview attempts, Spotify login.
@@ -519,6 +569,7 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             ev = conn.execute("DELETE FROM events WHERE user_id = %s", (user,)).rowcount
             pa = conn.execute("DELETE FROM preview_attempts WHERE user_id = %s", (user,)).rowcount
             sp = conn.execute("DELETE FROM spotify_auth WHERE user_id = %s", (user,)).rowcount
+            conn.execute("DELETE FROM user_prefs WHERE user_id = %s", (user,))
         return {"deleted": {"events": ev, "preview_attempts": pa, "spotify_login": sp}}
 
     # ── Spotify ──────────────────────────────────────────────────────────────────────────────
@@ -548,6 +599,11 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
         try:
             with pool.connection() as conn:
                 spotify.connect(conn, http, user, code, code_verifier)
+                set_blocked(conn, user, False)
+        except spotify.NotAllowlisted:
+            with pool.connection() as conn:
+                set_blocked(conn, user, True)
+            return RedirectResponse(with_param(back, spotify_error="not_allowlisted"), 302)
         except (spotify.SpotifyError, spotify.NotConnected) as e:
             msg = e.message if isinstance(e, spotify.SpotifyError) else "Login failed"
             if isinstance(e, spotify.SpotifyError) and e.status == 403:
@@ -584,6 +640,8 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
             except spotify.SpotifyError as e:
                 if body.playlist_id and e.status == 404:
                     raise HTTPException(404, "That playlist no longer exists; save it as new") from None
+                if spotify.is_allowlist_error(e):
+                    raise not_allowlisted(conn, user) from None
                 raise http_error(e) from None
             except spotify.NotConnected as e:
                 raise http_error(e) from None

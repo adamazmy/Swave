@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Archivo, Space_Mono } from "next/font/google";
 import { LogoIcon } from "@/components/icons";
+import ServiceMenu from "@/components/service-menu";
 import ThemeToggle from "@/components/theme-toggle";
 import { THEME_KEY } from "@/lib/theme";
 import "./globals.css";
@@ -34,8 +35,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <LogoIcon className="h-5 w-5 text-pink" />
               <span className="font-display text-sm font-semibold tracking-[0.45em]">Swave</span>
             </Link>
-            <div className="flex items-center gap-4">
-              <span className="label flex items-center gap-2 text-pink" aria-hidden="true">
+            <div className="flex items-center gap-2 sm:gap-4">
+              <ServiceMenu />
+              <span className="label hidden items-center gap-2 text-pink sm:flex" aria-hidden="true">
                 <span className="on-air h-2 w-2 rounded-full bg-pink" />
                 On air
               </span>

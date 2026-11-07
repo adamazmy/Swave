@@ -86,7 +86,7 @@ export default function ExportPanel({
           className="min-w-0 flex-1 basis-48 rounded-md border border-line bg-panel px-3 py-2.5 text-sm outline-none placeholder:text-dim focus:border-pink/60"
         />
         <button onClick={() => void copy()} disabled={n === 0} className={primary}>
-          {copied ? "Copied" : "Copy song list"}
+          {copied ? "Copied" : provider.name === "spotify" ? "Copy for Spotify" : "Copy song list"}
         </button>
         <button onClick={() => setShowList((s) => !s)} disabled={n === 0} aria-expanded={showList} className={secondary}>
           {showList ? "Hide songs" : `Open in ${provider.label}`}
@@ -99,7 +99,9 @@ export default function ExportPanel({
       <p className="mt-2 text-xs text-dim" aria-live="polite">
         {n === 0
           ? "Keep songs to build your set."
-          : `Swave can't add playlists to ${provider.label} directly. Paste the copied list into a playlist transfer tool (TuneMyMusic, SongShift…), or open each song and add it there.`}
+          : provider.name === "spotify"
+            ? "Paste the copied list into a playlist transfer tool (TuneMyMusic, Soundiiz…) to make it a Spotify playlist, or open each song in Spotify and add it there."
+            : `Swave can't add playlists to ${provider.label} directly. Paste the copied list into a playlist transfer tool (TuneMyMusic, SongShift…), or open each song and add it there.`}
       </p>
     </div>
   );

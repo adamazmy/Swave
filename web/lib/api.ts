@@ -41,14 +41,33 @@ export type AuthStatus = {
   can_upload_cover: boolean;
 };
 
+/** `code` (from the X-Swave-Error header) lets the UI react without parsing messages:
+ *  "reconnect" = log in to Spotify again, "not_allowlisted" = Spotify refuses this account. */
+export type ApiErrorCode = "reconnect" | "not_allowlisted";
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code: ApiErrorCode | null = null,
   ) {
     super(message);
   }
 }
+
+/** "I listen on": the music service a user picked (per user, on the server). */
+export type ServiceId = "spotify" | "apple" | "other";
+export type ServiceState = {
+  service: ServiceId | null; // null = not chosen yet: the picker shows once
+  owner_name: string; // who adds friends to the Spotify allowlist
+  spotify: {
+    configured: boolean;
+    connected: boolean;
+    display_name: string | null;
+    can_upload_cover: boolean;
+    blocked: boolean; // Spotify refused this account (not on the app's allowlist)
+  };
+};
 
 export type ImportResult = {
   playlist: { id: string; name: string; provider: "spotify" | "paste" };
@@ -118,7 +137,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* keep the generic message */
     }
-    throw new ApiError(res.status, detail);
+    const code = res.headers.get("X-Swave-Error");
+    throw new ApiError(res.status, detail,
+      code === "reconnect" || code === "not_allowlisted" ? code : null);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -176,6 +197,10 @@ export const api = {
     request<unknown>("/preview/attempts", { method: "POST", body: JSON.stringify(a) }).catch(() => undefined),
 
   authStatus: () => request<AuthStatus>("/auth/status"),
+  /** Your music service + Spotify connection. */
+  service: () => request<ServiceState>("/me/service"),
+  setService: (service: Exclude<ServiceId, "apple">) =>
+    request<ServiceState>("/me/service", { method: "PUT", body: JSON.stringify({ service }) }),
 
   /** Full-page redirect target: API → Spotify login → back to `returnTo`. */
   loginUrl: (returnTo: string) => `${API_URL}/auth/login?${new URLSearchParams({ return_to: returnTo })}`,

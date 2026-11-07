@@ -18,6 +18,7 @@ import { currentSession } from "@/lib/session";
 import { readSource } from "@/lib/source";
 import { clearAll, readResults, writeResults, type SavedPlaylist } from "@/lib/stored";
 import { openTrackUrl, useProvider } from "@/lib/provider";
+import { notAllowlistedLine, saveMode, takeResume, useMusicService, withoutReturnParams } from "@/lib/services";
 import { useCovers } from "@/lib/use-covers";
 import { usePreview } from "@/lib/use-preview";
 import { Spinner, XIcon } from "./icons";
@@ -69,6 +70,9 @@ export default function ResultsScreen() {
   // "New artists only" (off by default): leave out every artist already among the seeds.
   const [newArtists, setNewArtists] = useState(() => restored?.newArtists ?? false);
   const provider = useProvider();
+  const service = useMusicService();
+  // Back from the Spotify login: the save that sent us there (read once; the URL id must match).
+  const [resume] = useState(() => takeResume(params));
   // Alpha the API picked for the current list: replacements must use the same one.
   const [alpha, setAlpha] = useState(() => restored?.alpha ?? 0);
   // Playlist this vibe was saved to: the next save updates it instead of making a duplicate.
@@ -81,10 +85,13 @@ export default function ResultsScreen() {
   );
   // Coming back from the Spotify login redirect.
   const [notice, setNotice] = useState<string | null>(() => {
-    if (params.get("spotify") === "connected") return "Spotify connected. You can save your playlist now.";
+    if (params.get("spotify") === "connected") return params.has("resume") ? null : "Spotify connected.";
     const err = params.get("spotify_error");
-    return err ? `Spotify login failed: ${err}` : null;
+    if (err === "not_allowlisted") return "not_allowlisted"; // shown with the owner's name below
+    return err ? `Spotify login didn't finish: ${err}` : null;
   });
+  const owner = service.state?.owner_name ?? "the owner";
+  const noticeText = notice === "not_allowlisted" ? notAllowlistedLine(owner) : notice;
 
   const session = useRef<string>("");
   const requestId = useRef(0);
@@ -176,8 +183,8 @@ export default function ResultsScreen() {
   useEffect(() => {
     session.current = currentSession();
     if (latest.current.list.length === 0 && seeds.length) void load(seeds, slider);
-    else if (params.has("spotify") || params.has("spotify_error")) {
-      router.replace(resultsUrl(seeds, slider), { scroll: false });
+    else if (params.has("spotify") || params.has("spotify_error") || params.has("resume")) {
+      router.replace(withoutReturnParams(window.location.href), { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -421,10 +428,10 @@ export default function ResultsScreen() {
         </label>
       </div>
 
-      {notice && (
-        <p className="flex items-center justify-between rounded-md border border-line bg-panel px-3 py-2 text-sm text-muted">
-          {notice}
-          <button onClick={() => setNotice(null)} aria-label="Dismiss" className="p-1 text-dim hover:text-text">
+      {noticeText && (
+        <p role="status" className="flex items-center justify-between gap-2 rounded-md border border-line bg-panel px-3 py-1 text-sm text-muted">
+          {noticeText}
+          <button onClick={() => setNotice(null)} aria-label="Dismiss" className="grid min-h-11 min-w-11 place-items-center text-dim hover:text-text">
             <XIcon className="h-3.5 w-3.5" />
           </button>
         </p>
@@ -485,7 +492,7 @@ export default function ResultsScreen() {
         </div>
       )}
 
-      {status === "ready" && list.length > 0 && (provider.info.can_write ? (
+      {status === "ready" && list.length > 0 && (saveMode(service.state) === "spotify" ? (
         <SavePanel
           tracks={list.filter((t) => kept.has(t.track_uri))}
           details={{ name, description, cover }}
@@ -496,6 +503,8 @@ export default function ResultsScreen() {
           }}
           source={source?.provider === "paste" ? null : source}
           saved={saved}
+          resume={resume}
+          onBlocked={() => setNotice("not_allowlisted")}
           onSaved={(playlist) => {
             if (playlist) setSaved(playlist);
             log(

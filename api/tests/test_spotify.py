@@ -25,6 +25,7 @@ class FakeSpotify:
         self.forbid_read = False  # dev mode: playlist owned by someone else
         self.scope = "playlist-modify-private ugc-image-upload"
         self.fail_cover = False
+        self.not_registered = False  # dev mode: this account isn't on the app's User Management list
         self.covers: dict[str, bytes] = {}
         # (uri, title, artist) as Spotify returns them today
         self.playlist_items = [
@@ -47,6 +48,9 @@ class FakeSpotify:
             if form["refresh_token"] == ["revoked"]:
                 return httpx.Response(400, json={"error": "invalid_grant"})
             return httpx.Response(200, json={"access_token": "AT2", "expires_in": 3600})  # no new RT
+        if self.not_registered and req.url.host == "api.spotify.com":
+            return httpx.Response(403, json={"error": {"status": 403, "message":
+                                  "User not registered in the Developer Dashboard"}})
         if path == "/v1/me":
             return httpx.Response(200, json={"id": "owner", "display_name": "Test Owner"})
         if path == "/v1/me/playlists" and req.method == "POST":
@@ -87,7 +91,7 @@ def fake():
 def client(dsn, fake, monkeypatch):  # noqa: F811
     monkeypatch.setenv("SPOTIFY_CLIENT_ID", "test-client")
     with psycopg.connect(dsn) as conn:
-        conn.execute("DROP TABLE IF EXISTS spotify_auth")
+        conn.execute("DROP TABLE IF EXISTS spotify_auth; DROP TABLE IF EXISTS user_prefs")
     http = httpx.Client(transport=httpx.MockTransport(fake))
     with TestClient(create_app(dsn, http=http, weights={"cooccurrence_mpd": 1.0}),
                     follow_redirects=False) as c:
@@ -312,3 +316,48 @@ def test_add_skips_a_song_already_there_under_another_id(client, fake):
     adds = [json.loads(q.content)["uris"] for q in fake.requests
             if q.method == "POST" and q.url.path == f"/v1/playlists/{pid}/items"]
     assert adds == [[uri(3)]]
+
+
+# ── "I listen on": per-user service, allowlist refusals, silent reconnect ──────────────────────
+
+def test_service_choice_is_saved_per_user(client):
+    s = client.get("/me/service").json()
+    assert s["service"] is None and s["spotify"]["connected"] is False  # first visit: picker shows
+    assert client.put("/me/service", json={"service": "spotify"}).json()["service"] == "spotify"
+    assert client.get("/me/service").json()["service"] == "spotify"
+    assert client.put("/me/service", json={"service": "other"}).json()["service"] == "other"
+    assert client.put("/me/service", json={"service": "apple"}).status_code == 422  # coming soon
+    client.delete("/me/data")
+    assert client.get("/me/service").json()["service"] is None  # delete my data covers it
+
+
+def test_account_not_on_the_allowlist_is_refused_cleanly(client, fake, dsn):  # noqa: F811
+    fake.not_registered = True
+    r = client.get("/auth/login", params={"return_to": "http://localhost:3000/results?seeds=x"})
+    state = parse_qs(urlsplit(r.headers["location"]).query)["state"][0]
+    cb = client.get("/auth/callback", params={"state": state, "code": "CODE"})
+    loc = cb.headers["location"]
+    assert cb.status_code == 302 and loc.startswith("http://localhost:3000/results?seeds=x")
+    assert "spotify_error=not_allowlisted" in loc  # a code for the page, not a raw error
+    s = client.get("/me/service").json()["spotify"]
+    assert s["connected"] is False and s["blocked"] is True  # tokens dropped, saving falls back
+    with psycopg.connect(dsn) as conn:
+        assert conn.execute("SELECT count(*) FROM spotify_auth").fetchone()[0] == 0
+    fake.not_registered = False  # added to the allowlist: logging in again clears the flag
+    login(client)
+    s = client.get("/me/service").json()["spotify"]
+    assert s["connected"] is True and s["blocked"] is False
+
+
+def test_save_refused_for_allowlist_flags_the_user(client, fake):
+    login(client)
+    fake.not_registered = True  # removed from the allowlist after logging in
+    r = client.post("/save", json={"name": "x", "track_uris": [uri(1)]})
+    assert r.status_code == 403 and r.headers["x-swave-error"] == "not_allowlisted"
+    assert "Copy for Spotify" in r.json()["detail"]
+    assert client.get("/me/service").json()["spotify"]["blocked"] is True
+
+
+def test_save_without_a_login_asks_the_page_to_reconnect(client):
+    r = client.post("/save", json={"name": "x", "track_uris": [uri(1)]})
+    assert r.status_code == 401 and r.headers["x-swave-error"] == "reconnect"

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, type AuthStatus, type Recommendation } from "@/lib/api";
+import { api, ApiError, type Recommendation } from "@/lib/api";
+import { connect as connectService, type ResumeAction, useMusicService } from "@/lib/services";
 import { coverFromFile, generateCover } from "@/lib/cover";
 import { slug, toCsv } from "@/lib/playlist";
 import type { SourcePlaylist } from "@/lib/source";
@@ -19,6 +20,8 @@ type Props = {
   source: SourcePlaylist | null; // playlist the vibe was imported from
   saved: SavedPlaylist | null; // new playlist this vibe was already saved to
   onSaved: (playlist: SavedPlaylist | null) => void; // null = songs added to `source`
+  resume: ResumeAction | null; // finish this save after the Spotify login round trip
+  onBlocked: () => void; // Spotify refused this account: the page switches to the fallback bar
 };
 
 type Mode = "new" | "add";
@@ -38,9 +41,10 @@ const field = "rounded-md border border-line bg-panel px-3 py-2.5 text-sm outlin
  * - Add to <source>: appends kept songs to the pasted playlist, skipping ones already in it.
  * - Export CSV: fallback for playlist-transfer tools.
  */
-export default function SavePanel({ tracks, details, onDetails, source, saved, onSaved }: Props) {
-  const [auth, setAuth] = useState<AuthStatus | null>(null);
-  const [mode, setMode] = useState<Mode>("new");
+export default function SavePanel({ tracks, details, onDetails, source, saved, onSaved, resume, onBlocked }: Props) {
+  const { state, refresh } = useMusicService();
+  const auth = state?.spotify ?? null;
+  const [mode, setMode] = useState<Mode>(resume === "add" ? "add" : "new");
   const [customise, setCustomise] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -49,34 +53,41 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
   const variant = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    let live = true;
-    api
-      .authStatus()
-      .then((a) => live && setAuth(a))
-      .catch(
-        () => live && setAuth({ configured: false, connected: false, display_name: null, can_upload_cover: false }),
-      );
-    return () => {
-      live = false;
-    };
-  }, []);
-
   const n = tracks.length;
   const name = details.name.trim() || "Swave playlist";
   const uris = tracks.map((t) => t.track_uri);
   const coverBlocked = details.cover !== null && auth?.connected && !auth.can_upload_cover;
 
-  function fail(err: unknown) {
-    if (err instanceof ApiError && err.status === 401) {
-      setAuth((a) => (a ? { ...a, connected: false, display_name: null } : a));
+  /** Log in to Spotify (full-page redirect) and finish `action` when we're back. */
+  function reconnectThen(action: ResumeAction) {
+    setBusy(true);
+    connectService("spotify", action);
+  }
+
+  function fail(err: unknown, action: ResumeAction) {
+    if (err instanceof ApiError && err.code === "reconnect") return reconnectThen(action); // expired/revoked
+    if (err instanceof ApiError && err.code === "not_allowlisted") {
+      void refresh(); // marks the account blocked: the page swaps in the fallback bar
+      return onBlocked();
     }
     const msg = err instanceof ApiError ? err.message : "Something went wrong";
     setError(`${msg}. You can export a CSV instead.`);
   }
 
+  // Back from the Spotify login with an interrupted save: finish it (once).
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!resume || resumed.current || !auth?.connected || tracks.length === 0) return;
+    resumed.current = true;
+    if (resume === "add" && source) void addToSource();
+    else if (resume !== "add") void saveNew(resume === "save-new");
+    // run once when the login state arrives
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resume, auth?.connected]);
+
   async function saveNew(asNew: boolean) {
     if (busy) return;
+    if (!auth?.connected) return reconnectThen(asNew ? "save-new" : "save");
     setBusy(true);
     setError(null);
     setResult(null);
@@ -96,7 +107,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
       });
       onSaved({ id: res.id, url: res.url });
     } catch (err) {
-      fail(err);
+      fail(err, asNew ? "save-new" : "save");
     } finally {
       setBusy(false);
     }
@@ -104,6 +115,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
 
   async function addToSource() {
     if (busy || !source) return;
+    if (!auth?.connected) return reconnectThen("add");
     setBusy(true);
     setError(null);
     setResult(null);
@@ -113,7 +125,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
       setResult({ text: `Added ${res.added} new songs to “${source.name}”${skipped}.`, url: res.url });
       onSaved(null);
     } catch (err) {
-      fail(err);
+      fail(err, "add");
     } finally {
       setBusy(false);
     }
@@ -151,7 +163,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
   }
 
   function connect() {
-    window.location.href = api.loginUrl(window.location.href);
+    connectService("spotify"); // e.g. to grant the cover permission; comes back to this page
   }
 
   const connected = auth?.connected;
@@ -273,21 +285,16 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
           </p>
         )}
 
-        {connected ? (
-          mode === "new" ? (
-            <button onClick={() => void saveNew(false)} disabled={n === 0 || busy} className={primary}>
-              {busy ? <Spinner className="inline h-4 w-4" /> : saved ? "Update the set" : "Save the set"}
-            </button>
-          ) : (
-            <button onClick={() => void addToSource()} disabled={n === 0 || busy} className={primary}>
-              {busy ? <Spinner className="inline h-4 w-4" /> : `Add ${n} to playlist`}
-            </button>
-          )
-        ) : auth?.configured ? (
-          <button onClick={connect} className={primary}>
-            Connect Spotify
+        {/* No separate "connect" step: saving logs in first when needed, then finishes the save. */}
+        {mode === "new" ? (
+          <button onClick={() => void saveNew(false)} disabled={n === 0 || busy} className={primary}>
+            {busy ? <Spinner className="inline h-4 w-4" /> : saved ? "Update the set" : "Save the set"}
           </button>
-        ) : null}
+        ) : (
+          <button onClick={() => void addToSource()} disabled={n === 0 || busy} className={primary}>
+            {busy ? <Spinner className="inline h-4 w-4" /> : `Add ${n} to playlist`}
+          </button>
+        )}
         <button onClick={exportCsv} disabled={n === 0} className={secondary}>
           Export CSV
         </button>
@@ -314,7 +321,7 @@ export default function SavePanel({ tracks, details, onDetails, source, saved, o
         ) : connected ? (
           `${n} kept · saves a playlist as ${auth?.display_name}`
         ) : (
-          `${n} kept`
+          `${n} kept · saving takes you through a quick Spotify login first`
         )}
         {mode === "new" && saved && connected && (
           <>
