@@ -141,3 +141,14 @@ def test_cap_artists_keeps_best_per_artist_and_counts_the_list():
     # soft cap: too few other candidates, so the over-cap ones fill the end, best first
     assert rk.cap_artists(r, artist, 2, 10).track.tolist() == [10, 11, 13, 14, 12]
     assert rk.cap_artists(r, artist, 1, 5).track.tolist() == [10, 13, 14, 11, 12]
+
+
+def test_spread_artists_spaces_an_artists_songs_out():
+    # best-first: five songs by A, then others
+    songs = [("a1", "A"), ("a2", "A"), ("a3", "A"), ("a4", "A"), ("a5", "A"), ("b1", "B"), ("c1", "C"),
+             ("d1", "D"), ("b2", "B"), ("e1", "E")]
+    got = [n for n, _ in rk.spread_artists(songs, lambda s: s[1], 4)]
+    # A at most once in any 4 rows while others are left; once only A remains, A fills the end
+    assert got == ["a1", "b1", "c1", "d1", "a2", "b2", "e1", "a3", "a4", "a5"]
+    assert rk.spread_artists([], lambda s: s, 4) == []
+    assert [n for n, _ in rk.spread_artists(songs[:3], lambda s: s[1], 4)] == ["a1", "a2", "a3"]  # only A left

@@ -238,3 +238,15 @@ def test_new_artists_leaves_out_seed_artists(client):
     got = [r["track_uri"] for r in client.post("/recommend", json={
         "seeds": [uri(1)], "new_artists": True, "exclude_songs": [uri(2)]}).json()["results"]]
     assert got == [uri(3)]  # Mock Orchestra (2, 4, 6) gone as well
+
+
+def test_recommendations_space_out_an_artists_songs(client):
+    """Spreading never drops or demotes songs it can't place: with too few artists the order stays."""
+    plain = [r["track_uri"] for r in client.post("/recommend", json={
+        "seeds": [uri(1)], "max_per_artist": 0, "spread_artists": False}).json()["results"]]
+    assert plain == [uri(2), uri(3), uri(0), uri(4), uri(6)]
+    spread = [r["track_uri"] for r in client.post("/recommend", json={
+        "seeds": [uri(1)], "max_per_artist": 0}).json()["results"]]
+    # only 3 artists in 5 songs: no order keeps Mock Orchestra 4 rows apart, so the best-first
+    # fallback leaves the ranking as it is (the spacing itself: test_ranker)
+    assert spread == plain

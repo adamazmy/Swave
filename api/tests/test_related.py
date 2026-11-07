@@ -39,7 +39,8 @@ def test_related_artists_scorer_ranks_related_songs_and_caches_deezer(dsn):  # n
         with psycopg.connect(dsn) as conn:
             conn.execute("DELETE FROM deezer_related")
             artist_index.build(conn)
-        got = c.post("/recommend", json={"seeds": [uri(1)], "max_per_artist": 0}).json()["results"]
+        got = c.post("/recommend", json={"seeds": [uri(1)], "max_per_artist": 0,
+                                         "spread_artists": False}).json()["results"]
         names = [(r["name"], r["reason"]) for r in got]
         # weight(artist) × (0.5 + 0.5 × pop / the artist's best): Mock Orchestra (rank 0, weight 1):
         # Static Bloom 1.0, Quiet Engine 0.55, Live 0.5375; Dummy Duo (rank 1, 1/1.2): 0.833;

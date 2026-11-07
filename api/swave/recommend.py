@@ -127,6 +127,20 @@ def cap_artists(r: Ranked, artist_of: dict[int, str], cap: int, n: int,
     return Ranked(r.track[k], r.score[k], r.pop[k], r.rows[k])
 
 
+def spread_artists(items: list, artist_of: Callable[[object], str], gap: int = 4) -> list:
+    """Reorder best-first results so one artist's songs are spaced out instead of stacked:
+    walk down the list and take the best remaining song whose artist isn't among the last
+    `gap - 1` picks (same artist at most once in any `gap` consecutive rows). When every
+    remaining song is by a recent artist (a single-artist list's tail), take the best one.
+    Order within an artist and the set of songs are unchanged (hit-rate/recall@n unaffected)."""
+    remaining, out = list(items), []
+    while remaining:
+        recent = {artist_of(x) for x in out[-(gap - 1):]} if gap > 1 else set()
+        i = next((j for j, x in enumerate(remaining) if artist_of(x) not in recent), 0)
+        out.append(remaining.pop(i))
+    return out
+
+
 def alpha_for(adventure: float, c: Combined, exclude: np.ndarray, n: int, iters: int = 12) -> float:
     """Alpha that makes the slider feel even for every seed set.
 

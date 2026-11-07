@@ -26,6 +26,7 @@ from swave.recommend import MAX_ALPHA
 
 TRACK_URI = r"^spotify:track:[A-Za-z0-9]{22}$"
 RESOLVE_SPARE = 25  # extra ranked rows so dropped (unresolvable) ListenBrainz tracks get replaced
+ARTIST_GAP = 4  # spread_artists: same primary artist at most once in any 4 consecutive results
 MAX_PER_ARTIST = 5  # default cap per primary artist (listening sessions are often album runs)
 ACTIONS = ("shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved")
 Action = Literal["shown", "seeded", "previewed", "kept", "removed", "more_like_this", "saved"]
@@ -96,6 +97,8 @@ class RecommendIn(BaseModel):
     max_per_artist: int = Field(MAX_PER_ARTIST, ge=0, le=100)
     # Tracks already on the list: they count toward the cap (replacing one removed song).
     listed: list[str] = Field(default_factory=list, max_length=1000)
+    # Space one artist's songs out through the list (same artist at most once in 4 rows)
+    spread_artists: bool = True
     n: int = Field(50, ge=1, le=100)
 
 
@@ -470,6 +473,8 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
                 reason=w))
             if len(results) == body.n:
                 break
+        if body.spread_artists:
+            results = rk.spread_artists(results, lambda r: previews.loose_artist(r.artist), ARTIST_GAP)
         return RecommendOut(results=results, seeds=seeds, unknown_seeds=unknown, alpha=alpha)
 
     insert_event = """INSERT INTO events (session_id, action, track_uri, position, slider, user_id)
