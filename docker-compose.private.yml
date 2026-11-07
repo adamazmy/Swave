@@ -7,15 +7,21 @@
 # Nothing is published on the PC's ports: the only way in is the tunnel, and Cloudflare Access
 # (one-time PIN email login, allowlist) sits in front of it. The API verifies the Access JWT on
 # every request too (SWAVE_REQUIRE_ACCESS=1), so a request that bypassed Cloudflare is refused.
-# The database is the same `db` service and volume as development (docker-compose.yml).
+# Same `db` container as development, but its OWN database `swave_private` (role swave_private,
+# which cannot connect to the dev database `swave`): user data + caches + a copy of the music
+# index, refreshed only by `make private-index-sync`.
 
 services:
   api:
-    build: ./api
+    build:
+      context: ./api
+      args:
+        SWAVE_GIT: ${SWAVE_GIT:-unknown}  # set by make private-deploy
     restart: unless-stopped
     env_file: .env.private
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-swave}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.private}@db:5432/${POSTGRES_DB:-swave}
+      # its own database + non-superuser role (scripts/private-db-setup.ps1); dev stays on `swave`
+      DATABASE_URL: postgresql://swave_private:${PRIVATE_DB_PASSWORD:?set PRIVATE_DB_PASSWORD in .env.private}@db:5432/swave_private
       SWAVE_MODE: personal
       SWAVE_REQUIRE_ACCESS: "1"
       SWAVE_SCORERS: /app/scorers.json

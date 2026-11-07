@@ -14,7 +14,8 @@
 param(
     [string]$Dir = "",
     [int]$Days = 7,
-    [switch]$IncludeTokens
+    [switch]$IncludeTokens,
+    [string]$Database = "swave_private"   # the private instance's database (dev: -Database swave)
 )
 # "Continue", not "Stop": Docker writes progress to stderr, which Windows PowerShell 5.1 turns
 # into error records when output is redirected (scheduled task); success is judged by exit codes.
@@ -52,9 +53,10 @@ $tables = "events", "preview_attempts", "lb_spotify", "covers", "deezer_related"
 if ($IncludeTokens) { $tables += "spotify_auth" }
 New-Item -ItemType Directory -Force $full -ErrorAction Stop | Out-Null
 $name = "swave-{0:yyyyMMdd-HHmm}.dump" -f (Get-Date)
+if ($Database -ne "swave_private") { $name = "$Database-{0:yyyyMMdd-HHmm}.dump" -f (Get-Date) }
 $t = ($tables | ForEach-Object { "-t $_" }) -join " "
 # dump inside the container (binary-safe), then copy it out
-docker compose exec -T db sh -c "pg_dump -U `$POSTGRES_USER -d `$POSTGRES_DB -Fc $t -f /tmp/$name" 2>&1 | ForEach-Object { "$_" }
+docker compose exec -T db sh -c "pg_dump -U `$POSTGRES_USER -d $Database -Fc $t -f /tmp/$name" 2>&1 | ForEach-Object { "$_" }
 if ($LASTEXITCODE -ne 0) { throw "pg_dump failed ($LASTEXITCODE)" }
 docker compose cp "db:/tmp/$name" (Join-Path $full $name) 2>&1 | ForEach-Object { "$_" }
 if ($LASTEXITCODE -ne 0) { throw "copy out of the container failed ($LASTEXITCODE)" }
@@ -63,5 +65,5 @@ $size = [math]::Round((Get-Item (Join-Path $full $name) -ErrorAction Stop).Lengt
 Get-ChildItem $full -Filter "swave-*.dump" |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$Days) } |
     ForEach-Object { Remove-Item $_.FullName -ErrorAction Stop; "removed old backup $($_.Name)" }
-$what = if ($IncludeTokens) { "with Spotify logins" } else { "without Spotify logins" }
+$what = $(if ($IncludeTokens) { "with Spotify logins" } else { "without Spotify logins" }) + ", database $Database"
 "backup ok: $(Join-Path $full $name) ($size MB, $what)"

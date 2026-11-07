@@ -80,6 +80,7 @@ def client(dsn):
 def test_health(client):
     body = client.get("/health").json()
     assert body["ok"] and body["index"]["method"] == "cosine"
+    assert body["version"] == "dev"  # production images bake in SWAVE_GIT
 
 
 def test_search_matches_all_words_most_popular_first(client):

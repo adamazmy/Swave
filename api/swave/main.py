@@ -295,7 +295,8 @@ def create_app(dsn: str | None = None, http: httpx.Client | None = None,
     def health() -> dict:
         with pool.connection() as conn:
             meta = conn.execute("SELECT method, k, min_co, built_at FROM index_meta").fetchone()
-        return {"ok": True, "index": None if meta is None else
+        # version: the git commit baked into the production image (make private-deploy), else "dev"
+        return {"ok": True, "version": os.environ.get("SWAVE_GIT", "dev"), "index": None if meta is None else
                 {"method": meta[0], "k": meta[1], "min_co": meta[2], "built_at": meta[3]}}
 
     @app.get("/search", response_model=list[Track])

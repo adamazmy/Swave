@@ -1,7 +1,7 @@
 # CLAUDE.md: Swave
 
 Personal playlist builder. One loop: **seed → recommend → refine → save**.
-Runs locally for development; a **private instance** for the owner + friends runs from the owner's PC behind Cloudflare Tunnel + Access (`docs/PRIVATE.md`, `docker-compose.private.yml`). **The GitHub repo is PUBLIC**: read "Public repo rules" before every commit.
+Runs locally for development (database `swave`); a **private instance** for the owner + friends runs from the owner's PC behind Cloudflare Tunnel + Access (`docs/PRIVATE.md`, `docker-compose.private.yml`), on its own database `swave_private` (role `swave_private`, no access to `swave`; a copy of the music index refreshed by `make private-index-sync`). Deploy with `make private-deploy`. **The GitHub repo is PUBLIC**: read "Public repo rules" before every commit.
 
 ## Architecture
 
@@ -127,6 +127,7 @@ make feedback            # weekly keep rate, most-removed tracks/artists (WEEKS=
 - API errors: proper HTTP status + `{"detail": "..."}`. Validate inputs with Pydantic.
 - Every algorithm change → `make eval` → a new row in `eval/results.csv`, committed with the change.
 - Milestone loop: run tests + eval → commit → 5-line summary (works / doesn't / eval number) → wait for go-ahead.
+- **Database migrations must be backward-compatible** (add tables/columns, never rename or drop in the same release): the app migrates at startup (`CREATE … IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), `make private-deploy` reports it ("DB MIGRATION RAN"), and `make private-rollback` only swaps images back, so the previous code must still run on the new schema. Drop old columns in a later release, once nothing reads them.
 - Ask the owner before hard-to-undo decisions (schema changes that need re-ingest, deleting data, new external services).
 
 ## Spotify (dev mode, rules since Feb 2026)
