@@ -45,8 +45,17 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             </div>
           </header>
           <main className="pb-10 pt-4 sm:pt-10">{children}</main>
-          <footer className="border-t border-line/60 py-5 text-xs text-dim">
-            <Link href="/data" className="hover:text-text">What Swave stores</Link>
+          <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line/60 py-3 text-xs text-dim">
+            <Link href="/data" className="inline-flex min-h-11 items-center hover:text-text">What Swave stores</Link>
+            <span aria-hidden="true">·</span>
+            <a href="https://www.instagram.com/swave.party/" target="_blank" rel="noopener noreferrer"
+               className="inline-flex min-h-11 items-center hover:text-text">
+              Instagram @swave.party<span className="sr-only"> (opens in a new tab)</span>
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="mailto:joinswave@gmail.com" className="inline-flex min-h-11 items-center hover:text-text">
+              joinswave@gmail.com
+            </a>
           </footer>
         </div>
       </body>
