@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Archivo, Space_Mono } from "next/font/google";
-import { LogoIcon } from "@/components/icons";
+import { InstagramIcon, LogoIcon, MailIcon } from "@/components/icons";
 import ServiceMenu from "@/components/service-menu";
 import ThemeToggle from "@/components/theme-toggle";
 import { THEME_KEY } from "@/lib/theme";
@@ -49,12 +49,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <Link href="/data" className="inline-flex min-h-11 items-center hover:text-text">What Swave stores</Link>
             <span aria-hidden="true">·</span>
             <a href="https://www.instagram.com/swave.party/" target="_blank" rel="noopener noreferrer"
-               className="inline-flex min-h-11 items-center hover:text-text">
-              Instagram @swave.party<span className="sr-only"> (opens in a new tab)</span>
+               className="group inline-flex min-h-11 items-center gap-1.5 hover:text-text">
+              <InstagramIcon className="h-4 w-4 text-pink transition group-hover:text-pink-soft" />
+              <span className="sr-only">Instagram </span>@swave.party<span className="sr-only"> (opens in a new tab)</span>
             </a>
             <span aria-hidden="true">·</span>
-            <a href="mailto:joinswave@gmail.com" className="inline-flex min-h-11 items-center hover:text-text">
-              joinswave@gmail.com
+            <a href="mailto:joinswave@gmail.com" className="group inline-flex min-h-11 items-center gap-1.5 hover:text-text">
+              <MailIcon className="h-4 w-4 text-pink transition group-hover:text-pink-soft" />
+              <span className="sr-only">Email </span>joinswave@gmail.com
             </a>
           </footer>
         </div>

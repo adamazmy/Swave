@@ -80,3 +80,19 @@ export const ExternalIcon = ({ className = base }: P) => (
     <path d="M11 4h5v5M16 4l-7 7M9 5H5v10h10v-4" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+/** Instagram glyph as an outline (rounded square, lens, flash dot), drawn in the current colour. */
+export const InstagramIcon = ({ className = base }: P) => (
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true">
+    <rect x="3" y="3" width="14" height="14" rx="4" />
+    <circle cx="10" cy="10" r="3.2" />
+    <circle cx="14.2" cy="5.8" r="0.4" fill="currentColor" />
+  </svg>
+);
+
+export const MailIcon = ({ className = base }: P) => (
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true">
+    <rect x="2.5" y="4.5" width="15" height="11" rx="2" />
+    <path d="m3.5 6 6.5 5 6.5-5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
