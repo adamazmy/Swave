@@ -25,7 +25,7 @@ offline:  MPD slices ─▶ make ingest ─▶ make build-index ─┐
 - **Spotify or Apple Music.** Spotify users import playlists and save sets with one click. Apple Music users paste songs copied from Apple Music, then take the set back with a copied song list (for transfer tools like TuneMyMusic or SongShift), a CSV, or an Open-in-Apple-Music link per song (via the free iTunes Search API; saving straight to an Apple Music library would need Apple's paid MusicKit).
 - **ListenBrainz** (`make lb-ingest`, `make lb-build`): the last 3 years of public listens are read column-by-column from the remote dump (HTTP range requests, ~34 GB of the 249 GB), split into listening sessions (new session after 30 min, repeats collapsed, < 3 songs dropped) and turned into a second co-occurrence index. Songs are linked to the MPD tracks by normalised artist + title; the others (mostly post-2017 music) become new tracks, resolved to Spotify only when shown.
 
-> Status: MVP complete (M1–M5): pipeline, evaluation, API, frontend, Spotify save, feedback report. See [PLAN.md](PLAN.md).
+> Status: MVP complete (M1–M5): pipeline, evaluation, API, frontend, Spotify save, feedback report. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Feedback loop
 
