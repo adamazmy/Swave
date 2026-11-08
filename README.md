@@ -2,7 +2,7 @@
 
 A personal playlist builder. Pick 1–5 songs that capture a vibe, get 30–50 recommendations with a reason for each, keep / remove / "more like this" until it's right, then save it to Spotify.
 
-![Swave screenshot](docs/screenshot.png) <!-- placeholder: screenshot comes with the frontend (M3) -->
+<!-- TODO: add docs/screenshot.png and replace this comment with ![Swave screenshot](docs/screenshot.png) -->
 
 > **Dataset not included.** Swave is built on the [Spotify Million Playlist Dataset](https://www.aicrowd.com/challenges/spotify-million-playlist-dataset-challenge), which Spotify licenses for **non-commercial research use only** and which may not be redistributed. This repository contains only code. You must download the dataset yourself, and nothing derived from it (database tables, matrices, neighbour lists, exports) is ever committed here.
 
@@ -25,7 +25,7 @@ offline:  MPD slices ─▶ make ingest ─▶ make build-index ─┐
 - **Spotify or Apple Music.** Spotify users import playlists and save sets with one click. Apple Music users paste songs copied from Apple Music, then take the set back with a copied song list (for transfer tools like TuneMyMusic or SongShift), a CSV, or an Open-in-Apple-Music link per song (via the free iTunes Search API; saving straight to an Apple Music library would need Apple's paid MusicKit).
 - **ListenBrainz** (`make lb-ingest`, `make lb-build`): the last 3 years of public listens are read column-by-column from the remote dump (HTTP range requests, ~34 GB of the 249 GB), split into listening sessions (new session after 30 min, repeats collapsed, < 3 songs dropped) and turned into a second co-occurrence index. Songs are linked to the MPD tracks by normalised artist + title; the others (mostly post-2017 music) become new tracks, resolved to Spotify only when shown.
 
-> Status: MVP complete (M1–M5): pipeline, evaluation, API, frontend, Spotify save, feedback report. See [PLAN.md](PLAN.md).
+> Status: MVP complete (M1–M5): pipeline, evaluation, API, frontend, Spotify save, feedback report. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Feedback loop
 
@@ -64,11 +64,11 @@ The reason's "shared playlists" count is summed over seeds, so a playlist contai
 
 ## Setup
 
-Requirements: Docker, Python 3.12, GNU make (Windows: `winget install ezwinports.make`), Node 20+ (frontend, from M3).
+Requirements: Docker, Python 3.12, GNU make (Windows: `winget install ezwinports.make`), Node 20+ (frontend).
 
 1. **Get the dataset.** Create a free account on [AIcrowd](https://www.aicrowd.com/challenges/spotify-million-playlist-dataset-challenge), download `spotify_million_playlist_dataset.zip` and put it in `data/raw/`. You can leave it zipped (saves ~33 GB) or unzip the `mpd.slice.*.json` files into `data/raw/`.
 2. **Create a Spotify app** at <https://developer.spotify.com/dashboard> (development mode; the owner needs Spotify Premium): tick *Web API*, add redirect URI `http://127.0.0.1:8000/auth/callback` (a loopback IP: Spotify rejects `localhost`), and add your own account under *User Management*. Copy the **Client ID** into `SPOTIFY_CLIENT_ID`; no client secret is needed.
-3. **Configure:** `cp .env.example .env` and fill in a Postgres password, `DATABASE_URL` and (later) `SPOTIFY_CLIENT_ID`.
+3. **Configure:** `cp .env.example .env` and fill in a Postgres password, `DATABASE_URL` and `SPOTIFY_CLIENT_ID`.
 4. **Install:** `make setup` (Python venv, dependencies, pre-commit hooks).
 
 ## Commands
