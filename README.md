@@ -1,4 +1,7 @@
 # Swave
+<img width="1913" height="872" alt="image" src="https://github.com/user-attachments/assets/e3982653-828c-4efa-8369-9ffdb8646a2c" />
+<img width="1918" height="857" alt="image" src="https://github.com/user-attachments/assets/992c0c41-31d5-472c-844a-54e1a5328467" />
+
 
 A personal playlist builder. Pick 1–5 songs that capture a vibe, get 30–50 recommendations with a reason for each, keep / remove / "more like this" until it's right, then save it to Spotify.
 
