@@ -1,6 +1,10 @@
 services:
   db:
     image: postgres:16
+    # Back by itself whenever Docker starts (e.g. after a PC restart): the private instance needs it.
+    # Here, not in the private override, so `make db` and the private compose agree and neither
+    # recreates the container to change it.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-swave}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}

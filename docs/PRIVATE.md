@@ -18,12 +18,18 @@ All commands run from the repo folder (`C:\Dev\Swave`), with Docker Desktop runn
 
 | | Command |
 |---|---|
-| Start (or restart after a reboot) | `make private-up` |
+| Start (if it didn't come back by itself) | `make private-up` |
 | Stop (friends see a Cloudflare error page) | `make private-down` |
-| Is it working? | `make private-logs` (Ctrl-C to leave), or open your domain |
+| Is it working? | `make private-status`: containers, tunnel, public URL, deployed commit, last backup, Docker autostart |
+| What is it doing? | `make private-logs` (Ctrl-C to leave) |
 
-The PC must be on, awake and running Docker for friends to use Swave. The containers restart on
-their own after Docker restarts. Development (`make dev`) can run at the same time.
+The PC must be on, awake and running Docker for friends to use Swave. All four containers (db, api,
+web, cloudflared) are `restart: unless-stopped`, so they come back whenever Docker starts; for that
+to happen after a reboot, Docker Desktop must start at sign-in (Settings > General > *Start Docker
+Desktop when you sign in*, and not disabled in Task Manager > Startup apps; `make private-status`
+checks both). If the API starts before the database it exits and Docker restarts it until the
+database is up. Cloudflare error 1033 means the tunnel isn't connected: Docker isn't running or
+`cloudflared` is down. Development (`make dev`) can run at the same time.
 
 ## Inviting a friend (checklist)
 
